@@ -1,0 +1,104 @@
+Sample ID	Subject Number	 HISTOLOGY	Tumor_Sample_Barcode
+p22162-s001	Emory-003	adeno	s001_Emory-003
+p22162-s002	Emory-004	adeno	s002_Emory-004
+p22162-s003	Emory-005	adeno	s003_Emory-005
+p22162-s004	Emory-006	"Mixed (urothelial, adeno)"	s004_Emory-006
+p22162-s005	Emory-007	adeno	s005_Emory-007
+p22162-s006	Emory-008	adeno	s006_Emory-008
+p22162-s007	Emory-009	adeno	s007_Emory-009
+p22162-s008	Emory-011	adeno	s008_Emory-011
+p22162-s009	Emory-012	adeno	s009_Emory-012
+p22162-s010	Emory-013	adeno	s010_Emory-013
+p22162-s011	Emory-014	adeno	s011_Emory-014
+p22162-s012	Emory-015	adeno	s012_Emory-015
+p22162-s013	Emory-016	"Mixed (sarcomatoid, squamous)"	s013_Emory-016
+p22162-s014	Emory-018	squamous	s014_Emory-018
+p22162-s015	Emory-019	squamous	s015_Emory-019
+p22162-s016	Emory-020	squamous	s016_Emory-020
+p22162-s017	Emory-021	squamous	s017_Emory-021
+p22162-s018	Emory-022	squamous	s018_Emory-022
+p22162-s019	Emory-023	squamous	s019_Emory-023
+p22162-s020	Emory-024	"Mixed (Squamous, plamacytoid, micropap)"	s020_Emory-024
+p22162-s021	Emory-025	squamous	s021_Emory-025
+p22162-s022	Emory-026	squamous	s022_Emory-026
+p22162-s023	Emory-028	squamous	s023_Emory-028
+p22162-s024	Emory-029	small cell	s024_Emory-029
+p22162-s025	Emory-030	small cell	s025_Emory-030
+p22162-s026	Emory-031	squamous	s026_Emory-031
+p22162-s027	Emory-032	squamous	s027_Emory-032
+p22162-s028	Emory-034	squamous	s028_Emory-034
+p22162-s029	Emory-035	squamous	s029_Emory-035
+p22162-s030	Emory-036	squamous	s030_Emory-036
+p22162-s031	Emory-037	squamous	s031_Emory-037
+p22162-s032	Emory-038	squamous	s032_Emory-038
+p22162-s033	Emory-039	squamous	s033_Emory-039
+p22162-s034	Emory-040	squamous	s034_Emory-040
+p22162-s035	Emory-041	squamous	s035_Emory-041
+p22162-s036	Emory-043	squamous	s036_Emory-043
+p22162-s037	Emory-044	small cell	s037_Emory-044
+p22162-s038	Emory-044	sarcomatoid	s038_Emory-044
+p22162-s039	Emory-045	sarcomatoid	s039_Emory-045
+p22162-s040	Emory-046	"Mixed (sarcomatoid, squamous)"	s040_Emory-046
+p22162-s041	Emory-048	sarcomatoid	s041_Emory-048
+p22162-s042	Emory-049	sarcomatoid	s042_Emory-049
+p22162-s043	Emory-052	plasmacytoid	s043_Emory-052
+p22162-s044	Emory-055	plasmacytoid	s044_Emory-055
+p22162-s045	Emory-056	plasmacytoid	s045_Emory-056
+p22162-s046	Emory-058	plasmacytoid	s046_Emory-058
+p22162-s047	Emory-061	adenocarcinoma	s047_Emory-061
+p22162-s048	Emory-061	plasmacytoid	s048_Emory-061
+p22162-s049	Emory-062	plasmacytoid	s049_Emory-062
+p22162-s050	Emory-064	plasmacytoid	s050_Emory-064
+p22162-s051	Emory-066	plasmacytoid	s051_Emory-066
+p22162-s052	Emory-067	plasmacytoid	s052_Emory-067
+p22162-s053	Emory-070	adeno	s053_Emory-070
+p22162-s054	Emory-072	adeno	s054_Emory-072
+p22162-s055	Emory-073	squamous	s055_Emory-073
+p22162-s056	Emory-074	squamous	s056_Emory-074
+p22162-s057	Emory-075	small cell	s057_Emory-075
+p22162-s058	Emory-076	squamous	s058_Emory-076
+p22162-s059	Emory-077	small cell	s059_Emory-077
+p22162-s060	Emory-078	sarcomatoid	s060_Emory-078
+p22162-s061	Emory-080	sarcomatoid	s061_Emory-080
+p22162-s062	Emory-082	adeno	s062_Emory-082
+p22162-s063	Emory-083	sarcomatoid	s063_Emory-083
+p22162-s064	Emory-084	adeno	s064_Emory-084
+p22162-s065	Emory-085	squamous	s065_Emory-085
+p22162-s066	Emory-086	squamous	s066_Emory-086
+p22162-s067	Emory-087	squamous	s067_Emory-087
+p22162-s068	Emory-088	adeno	s068_Emory-088
+p22162-s069	Emory-089	sarcomatoid	s069_Emory-089
+p22162-s070	Emory-090	small cell	s070_Emory-090
+p22162-s071	Emory-091	sarcomatoid	s071_Emory-091
+p22162-s072	Emory-092	squamous	s072_Emory-092
+p22162-s073	Emory-092	sarcomatoid	s073_Emory-092
+p22162-s074	Emory-093	squamous	s074_Emory-093
+p22162-s075	Emory-094	sarcomatoid	s075_Emory-094
+p22162-s076	Emory-095	squamous	s076_Emory-095
+p22162-s077	Emory-095	sarcomatoid	s077_Emory-095
+p22162-s078	Emory-096	sarcomatoid	s078_Emory-096
+p22162-s079	Emory-097	sarcomatoid	s079_Emory-097
+p22162-s080	Emory-098	sarcomatoid	s080_Emory-098
+p22162-s081	Emory-099	sarcomatoid	s081_Emory-099
+p22162-s082	Emory-100	"Mixed (sarcomatoid, squamous)"	s082_Emory-100
+p22162-s083	Emory-101	sarcomatoid	s083_Emory-101
+p22162-s084	Emory-102	sarcomatoid	s084_Emory-102
+p22162-s085	Emory-102	osteoclast like giant cell UCA	s085_Emory-102
+p22162-s086	Emory-103	small cell	s086_Emory-103
+p22162-s087	Emory-104	sarcomatoid	s087_Emory-104
+p22162-s088	Emory-105	small cell	s088_Emory-105
+p22162-s089	Emory-106	sarcomatoid	s089_Emory-106
+p22162-s090	Emory-108	sarcomatoid	s090_Emory-108
+p22162-s091	Emory-109	adeno	s091_Emory-109
+p22162-s092	Emory-110	sarcomatoid	s092_Emory-110
+p22162-s093	Emory-111	squamous	s093_Emory-111
+p22162-s094	Emory-112	plasmacytoid	s094_Emory-112
+p22162-s095	Emory-113	small cell	s095_Emory-113
+p22162-s096	Emory-114	small cell	s096_Emory-114
+p22162-s097	Emory-116	sarcomatoid	s097_Emory-116
+p22162-s098	Emory-117	sarcomatoid	s098_Emory-117
+p22162-s099	Emory-118	adenocarcinoma	s099_Emory-118
+p22162-s100	Emory-118	small cell	s100_Emory-118
+p22162-s101	Emory-119	sarcomatoid	s101_Emory-119
+p22162-s102	Emory-120	sarcomatoid	s102_Emory-120
+p22162-s137	Emory-121	small cell	s137_Emory-121

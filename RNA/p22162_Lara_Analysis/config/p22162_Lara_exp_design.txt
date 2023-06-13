@@ -1,0 +1,104 @@
+FileID	SampleID	SubjectNumber	CollectionDate	Age	TumorRegions	MatchedNormal	CollectionSite	Group	Batch
+p22162-s001_Emory-003_S1	Emory-003	Emory-003	7/31/12	74	1	1	1	adenocarcinoma	B
+p22162-s002_Emory-004_S2	Emory-004	Emory-004	12/3/14	56	1	0	1	adenocarcinoma	B
+p22162-s003_Emory-005_S3	Emory-005	Emory-005	9/22/17	75	1	0	1	adenocarcinoma	B
+p22162-s004_Emory-006_S4	Emory-006	Emory-006	4/9/18	37	1	0	1	Mixed (urothelial, adenocarcinoma)	B
+p22162-s005_Emory-007_S1	Emory-007	Emory-007	11/3/14	77	1	1	1	adenocarcinoma	A
+p22162-s006_Emory-008_S5	Emory-008	Emory-008	5/24/11	22	1	1	1	adenocarcinoma	B
+p22162-s007_Emory-009_S2	Emory-009	Emory-009	5/15/15	54	1	1	1	adenocarcinoma	A
+p22162-s008_Emory-011_S6	Emory-011	Emory-011	5/21/14	71	1	0	1	adenocarcinoma	B
+p22162-s009_Emory-012_S7	Emory-012	Emory-012	7/15/13	55	1	1	1	adenocarcinoma	B
+p22162-s010_Emory-013_S3	Emory-013	Emory-013	4/11/14	57	1	1	1	adenocarcinoma	A
+p22162-s011_Emory-014_S4	Emory-014	Emory-014	10/23/14	88	1	1	1	adenocarcinoma	A
+p22162-s012_Emory-015_S8	Emory-015	Emory-015	7/6/20	77	1	1	1	adenocarcinoma	B
+p22162-s013_Emory-016_S9	Emory-016	Emory-016	NA	NA	1	0	NA	Mixed (sarcomatoid, squamous)	B
+p22162-s014_Emory-018_S10	Emory-018	Emory-018	4/7/16	68	1	0	1	squamous	B
+p22162-s015_Emory-019_S11	Emory-019	Emory-019	8/20/15	81	1	0	1	squamous	B
+p22162-s016_Emory-020_S5	Emory-020	Emory-020	3/24/17	72	1	1	2	squamous	A
+p22162-s017_Emory-021_S6	Emory-021	Emory-021	5/11/20	68	1	0	1	squamous	A
+p22162-s018_Emory-022_S12	Emory-022	Emory-022	12/22/14	75	1	0	1	squamous	B
+p22162-s019_Emory-023_S7	Emory-023	Emory-023	9/25/13	53	1	0	1	squamous	A
+p22162-s020_Emory-024_S13	Emory-024	Emory-024	NA	NA	1	0	NA	Mixed (Squamous, plamacytoid, micropap)	B
+p22162-s021_Emory-025_S14	Emory-025	Emory-025	4/1/15	66	1	0	1	squamous	B
+p22162-s022_Emory-026_S15	Emory-026	Emory-026	8/29/12	60	1	0	1	squamous	B
+p22162-s023_Emory-028_S8	Emory-028	Emory-028	10/24/12	81	1	0	2	squamous	A
+p22162-s024_Emory-029_S9	Emory-029	Emory-029	3/9/12	55	1	0	1	small cell	A
+p22162-s025_Emory-030_S10	Emory-030	Emory-030	8/1/11	67	1	0	1	small cell	A
+p22162-s026_Emory-031_S16	Emory-031	Emory-031	11/9/17	73	1	0	1	squamous	B
+p22162-s027_Emory-032_S11	Emory-032	Emory-032	2/17/17	77	1	1	1	squamous	A
+p22162-s028_Emory-034_S12	Emory-034	Emory-034	10/9/17	42	1	0	1	squamous	A
+p22162-s029_Emory-035_S13	Emory-035	Emory-035	1/25/18	75	1	0	1	squamous	A
+p22162-s030_Emory-036_S17	Emory-036	Emory-036	1/12/16	52	1	1	1	squamous	B
+p22162-s031_Emory-037_S14	Emory-037	Emory-037	4/4/16	84	1	0	1	squamous	A
+p22162-s032_Emory-038_S18	Emory-038	Emory-038	5/2/17	65	1	1	2	squamous	B
+p22162-s033_Emory-039_S19	Emory-039	Emory-039	8/14/13	71	1	1	1	squamous	B
+p22162-s034_Emory-040_S15	Emory-040	Emory-040	10/10/16	69	1	1	1	squamous	A
+p22162-s035_Emory-041_S16	Emory-041	Emory-041	2/27/14	61	1	1	1	squamous	A
+p22162-s036_Emory-043_S20	Emory-043	Emory-043	3/11/21	74	1	1	1	squamous	B
+p22162-s037_Emory-044_S17	Emory-044.1	Emory-044	2/14/13	58	2	0	1	small cell	A
+p22162-s038_Emory-044_S18	Emory-044.2	Emory-044	2/14/13	58	2	0	1	sarcomatoid	A
+p22162-s039_Emory-045_S21	Emory-045	Emory-045	9/29/14	61	1	1	1	sarcomatoid	B
+p22162-s040_Emory-046_S19	Emory-046	Emory-046	NA	NA	1	0	NA	Mixed (sarcomatoid, squamous)	A
+p22162-s041_Emory-048_S22	Emory-048	Emory-048	8/6/20	43	1	0	1	sarcomatoid	B
+p22162-s042_Emory-049_S20	Emory-049	Emory-049	8/19/19	68	1	1	1	sarcomatoid	A
+p22162-s043_Emory-052_S21	Emory-052	Emory-052	5/25/18	46	1	0	1	plasmacytoid	A
+p22162-s044_Emory-055_S23	Emory-055	Emory-055	12/7/12	62	1	0	1	plasmacytoid	B
+p22162-s045_Emory-056_S22	Emory-056	Emory-056	9/9/11	66	1	0	1	plasmacytoid	A
+p22162-s046_Emory-058_S23	Emory-058	Emory-058	8/22/11	75	1	0	1	plasmacytoid	A
+p22162-s047_Emory-061_S24	Emory-061.1	Emory-061	9/17/18	80	2	0	1	adenocarcinoma	B
+p22162-s048_Emory-061_S25	Emory-061.2	Emory-061	9/17/18	80	2	0	1	plasmacytoid	B
+p22162-s049_Emory-062_S24	Emory-062	Emory-062	2/6/20	59	1	0	1	plasmacytoid	A
+p22162-s050_Emory-064_S26	Emory-064	Emory-064	9/6/16	69	1	0	1	plasmacytoid	B
+p22162-s051_Emory-066_S27	Emory-066	Emory-066	9/4/18	91	1	0	1	plasmacytoid	B
+p22162-s052_Emory-067_S28	Emory-067	Emory-067	3/27/17	53	1	0	1	plasmacytoid	B
+p22162-s053_Emory-070_S25	Emory-070	Emory-070	10/18/18	73	1	1	1	adenocarcinoma	A
+p22162-s054_Emory-072_S29	Emory-072	Emory-072	1/31/19	60	1	1	1	adenocarcinoma	B
+p22162-s055_Emory-073_S30	Emory-073	Emory-073	5/1/18	77	1	1	1	squamous	B
+p22162-s056_Emory-074_S26	Emory-074	Emory-074	9/1/19	83	1	0	1	squamous	A
+p22162-s057_Emory-075_S27	Emory-075	Emory-075	2/1/18	62	1	1	1	small cell	A
+p22162-s058_Emory-076_S31	Emory-076	Emory-076	3/28/19	75	1	0	1	squamous	B
+p22162-s059_Emory-077_S32	Emory-077	Emory-077	9/3/19	87	1	0	1	small cell	B
+p22162-s060_Emory-078_S28	Emory-078	Emory-078	10/23/20	72	1	0	1	sarcomatoid	A
+p22162-s061_Emory-080_S33	Emory-080	Emory-080	7/12/13	28	1	1	1	sarcomatoid	B
+p22162-s062_Emory-082_S29	Emory-082	Emory-082	10/31/13	71	1	0	1	adenocarcinoma	A
+p22162-s063_Emory-083_S30	Emory-083	Emory-083	8/8/19	28	1	0	1	sarcomatoid	A
+p22162-s064_Emory-084_S31	Emory-084	Emory-084	3/12/20	54	1	0	1	adenocarcinoma	A
+p22162-s065_Emory-085_S32	Emory-085	Emory-085	2/1/14	65	1	0	1	squamous	A
+p22162-s066_Emory-086_S33	Emory-086	Emory-086	1/1/13	67	1	0	1	squamous	A
+p22162-s067_Emory-087_S34	Emory-087	Emory-087	5/11/12	52	1	0	1	squamous	B
+p22162-s068_Emory-088_S34	Emory-088	Emory-088	12/1/19	90	1	0	1	adenocarcinoma	A
+p22162-s069_Emory-089_S35	Emory-089	Emory-089	8/31/20	76	1	1	1	sarcomatoid	B
+p22162-s070_Emory-090_S35	Emory-090	Emory-090	6/29/12	76	1	0	1	small cell	A
+p22162-s071_Emory-091_S36	Emory-091	Emory-091	2/28/14	91	1	1	1	sarcomatoid	A
+p22162-s072_Emory-092_S36	Emory-092.1	Emory-092	8/28/20	72	2	0	1	squamous	B
+p22162-s073_Emory-092_S37	Emory-092.2	Emory-092	8/28/20	72	2	0	1	sarcomatoid	B
+p22162-s074_Emory-093_S38	Emory-093	Emory-093	1/12/21	83	1	0	1	squamous	B
+p22162-s075_Emory-094_S39	Emory-094	Emory-094	2/8/21	80	1	1	1	sarcomatoid	B
+p22162-s076_Emory-095_S37	Emory-095.1	Emory-095	3/13/18	84	2	0	1	squamous	A
+p22162-s077_Emory-095_S38	Emory-095.2	Emory-095	3/13/18	84	2	0	1	sarcomatoid	A
+p22162-s078_Emory-096_S39	Emory-096	Emory-096	1/26/18	61	1	1	1	sarcomatoid	A
+p22162-s079_Emory-097_S40	Emory-097	Emory-097	6/30/16	62	1	1	1	sarcomatoid	B
+p22162-s080_Emory-098_S40	Emory-098	Emory-098	3/9/15	62	1	0	1	sarcomatoid	A
+p22162-s081_Emory-099_S41	Emory-099	Emory-099	6/15/15	71	1	1	1	sarcomatoid	A
+p22162-s082_Emory-100_S42	Emory-100	Emory-100	4/18/12	71	1	0	1	Mixed (sarcomatoid, squamous)	A
+p22162-s083_Emory-101_S41	Emory-101	Emory-101	10/3/12	74	1	0	1	sarcomatoid	B
+p22162-s084_Emory-102_S42	Emory-102.1	Emory-102	8/16/13	65	1	0	1	sarcomatoid	B
+p22162-s085_Emory-102_S43	Emory-102.2	Emory-102	8/16/13	65	1	0	1	osteoclast like giant cell UCA	B
+p22162-s086_Emory-103_S44	Emory-103	Emory-103	4/13/17	40	1	0	1	small cell	B
+p22162-s087_Emory-104_S45	Emory-104	Emory-104	7/6/20	56	1	0	1	sarcomatoid	B
+p22162-s088_Emory-105_S46	Emory-105	Emory-105	8/2/16	71	1	1	1	small cell	B
+p22162-s089_Emory-106_S47	Emory-106	Emory-106	4/17/13	70	1	1	1	sarcomatoid	B
+p22162-s090_Emory-108_S43	Emory-108	Emory-108	3/16/16	52	1	0	1	sarcomatoid	A
+p22162-s091_Emory-109_S44	Emory-109	Emory-109	6/5/20	74	1	0	1	adenocarcinoma	A
+p22162-s092_Emory-110_S45	Emory-110	Emory-110	8/17/12	76	1	0	1	sarcomatoid	A
+p22162-s093_Emory-111_S46	Emory-111	Emory-111	9/23/19	74	1	0	1	squamous	A
+p22162-s094_Emory-112_S47	Emory-112	Emory-112	1/22/16	81	1	0	1	plasmacytoid	A
+p22162-s095_Emory-113_S48	Emory-113	Emory-113	12/12/19	73	1	0	1	small cell	B
+p22162-s096_Emory-114_S49	Emory-114	Emory-114	11/18/19	63	1	0	1	small cell	B
+p22162-s097_Emory-116_S48	Emory-116	Emory-116	12/16/19	77	1	1	1	sarcomatoid	A
+p22162-s098_Emory-117_S49	Emory-117	Emory-117	5/25/18	46	1	1	1	sarcomatoid	A
+p22162-s099_Emory-118_S50	Emory-118.1	Emory-118	NA	NA	2	0	NA	adenocarcinoma	A
+p22162-s100_Emory-118_S51	Emory-118.2	Emory-118	NA	NA	2	0	NA	small cell	A
+p22162-s101_Emory-119_S50	Emory-119	Emory-119	NA	NA	1	0	NA	sarcomatoid	B
+p22162-s102_Emory-120_S52	Emory-120	Emory-120	NA	NA	1	0	NA	sarcomatoid	A
+p22162-s137_Emory-121_S51	Emory-121	Emory-121	NA	NA	1	0	NA	small cell	B

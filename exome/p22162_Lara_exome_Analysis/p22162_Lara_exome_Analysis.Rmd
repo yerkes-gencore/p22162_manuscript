@@ -1,0 +1,1169 @@
+---
+title: "p22162_Lara_exome_analysis"
+author: "DTG"
+date: "`r Sys.Date()`"
+output: 
+  rmdformats::readthedown:
+    fig_width: 9
+    toc_depth: 4
+---
+
+<style type="text/css">
+ #content {
+   max-width: 1200px;
+ }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, fig.align = 'center')
+#library(PureCN)
+library(maftools)
+library(tidyverse)
+library(DT)
+library(gridExtra)
+##library(rDGIdb)
+library(fgsea)
+library(clusterProfiler)
+library(MatrixGenerics)
+library(data.table)
+library(jsonlite)
+library(httr)
+httr::set_config(httr::config(http_version = 2))
+```
+
+```{r gsea_setup}
+run_fgsea <- function(result, gmt.file=gmt.file, nperm=1000){
+  result <- result %>% na.omit()
+  tmp1 <- result$stat
+  names(tmp1) <- rownames(result)
+  tmp1 <- tmp1[!is.na(tmp1)]
+  res <- fgseaSimple(pathways=gmt.file,
+                     stats=tmp1,
+                     nperm=nperm)
+  return(res)
+}
+
+pathways.core <- list()
+for (file in c(
+  "/Volumes/yerkes/genomelab/illumina//runs/tools/fGSEA/homo_sapiens/c2.cp.v7.5.1.symbols.gmt", 
+"/Volumes/yerkes/genomelab/illumina//runs/tools/fGSEA/homo_sapiens/c5.go.bp.v7.5.1.symbols.gmt"  ,
+"/Volumes/yerkes/genomelab/illumina//runs/tools/fGSEA/homo_sapiens/h.all.v7.5.1.symbols.gmt" )){
+  pathways.core <- append(pathways.core, gmtPathways(file.path(file)))
+}
+
+oncogenic_sig_pathways <- data.table::fread(input = system.file("extdata", "oncogenic_sig_patwhays.tsv", package = "maftools"))
+pathways.cancer <- list()
+
+for (pathway in oncogenic_sig_pathways$Pathway){
+  pathways.cancer[[pathway]] <- c(oncogenic_sig_pathways %>% filter(Pathway == 'WNT') %>% select(Gene) %>% unlist() %>% unname())
+}
+pathways.cancer <- append(pathways.cancer, gmtPathways(
+"/Volumes/yerkes/genomelab/illumina//runs/tools/fGSEA/homo_sapiens/c6.all.v2022.1.Hs.symbols.gmt"))
+pathways.core.cancer.oncopathwayformat <- stack(pathways.core) %>% filter(grepl('cancer', ind, ignore.case = TRUE)) %>% rename(Gene = values, Pathway = ind) %>% mutate(OG_TSG = 'TSG')
+```
+
+```{r oncokb_query_functions}
+query_oncokb_api_check <- function(gene, mutation){
+  
+  url = "https://www.oncokb.org/api/v1/annotate/mutations/byProteinChange"
+  token <- '661e1a4e-56ae-4b91-a236-6cfbab90eac2'
+  res_GET <- GET(url, 
+             query = list(hugoSymbol = gene,
+                          alteration = mutation, 
+                          referenceGenome = 'GRCh38'),
+             add_headers(Authorization = paste0(' Bearer ', token), accept = 'application/json'))
+  res_content <- fromJSON(rawToChar(res_GET$content), flatten = TRUE)
+  if (res_content$geneExist){ 
+    if (res_content$variantExist){
+      return(res_content$oncogenic)
+    } else {
+      return(NA)
+    }
+  } else {
+    return(NA)
+  }
+}
+
+query_oncokb_api_check_nomut <- function(gene){
+  
+  url = "https://www.oncokb.org/api/v1/annotate/mutations/byProteinChange"
+  token <- '661e1a4e-56ae-4b91-a236-6cfbab90eac2'
+  res_GET <- GET(url, 
+             query = list(hugoSymbol = gene, 
+                          referenceGenome = 'GRCh38'),
+             add_headers(Authorization = paste0(' Bearer ', token), accept = 'application/json'))
+  res_content <- fromJSON(rawToChar(res_GET$content), flatten = TRUE)
+  if (res_content$geneExist){ 
+    if (res_content$variantExist){
+      return(res_content$oncogenic)
+    } else {
+      return(NA)
+    }
+  } else {
+    return(NA)
+  }
+}
+
+query_oncokb_api_drug <- function(gene, mutation){
+  url = "https://www.oncokb.org/api/v1/annotate/mutations/byProteinChange"
+  token <- '661e1a4e-56ae-4b91-a236-6cfbab90eac2'
+  res_GET <- GET(url, 
+             query = list(hugoSymbol = gene,
+                          alteration = mutation, 
+                          referenceGenome = 'GRCh38'),
+             add_headers(Authorization = paste0(' Bearer ', token),
+                         accept = 'application/json'))
+  res_content <- fromJSON(rawToChar(res_GET$content), flatten = TRUE)
+    
+  if (length(res_content$treatments)>0) {
+    treatments <- res_content$treatments %>% filter(grepl(mutation, alterations) | grepl('Oncogenic Mutations', alterations))
+    #%>% select(drugs)
+    #test <- treatments %>% 
+    #  select(alterations, drugs, level, fdaLevel, levelAssociatedCancerType.mainType.name, levelExcludedCancerTypes)
+    treatments$drugName <- lapply(1:nrow(treatments),
+                                  function(x){treatments$drugs[[x]]$drugName})
+    treatments$levelExcludedCancerTypes <- 
+      lapply(1:nrow(treatments),
+             function(x){treatments$levelExcludedCancerTypes[[x]]$mainType.name})
+    treatments$gene <- gene
+    treatmenets <- treatments %>% select(alterations, drugName, level, fdaLevel, levelAssociatedCancerType.mainType.name, levelExcludedCancerTypes)
+    return(treatments %>% select(gene, alterations, drugName, level, fdaLevel, levelAssociatedCancerType.mainType.name, levelExcludedCancerTypes))
+  } else {
+    return(NA)
+  }
+}
+```
+
+```{r my_OncogenicPathways_func}
+my_OncogenicPathways = function(maf, pathdb = 'default', pathways = NULL, fontSize = .75, panelWidths = c(5, 3, 3)){
+  if (pathdb == 'default'){
+    pathdb <- system.file("extdata", "oncogenic_sig_patwhays.tsv", package = "maftools")
+    pathdb = data.table::fread(input = pathdb)
+  }else if (pathdb == 'custom'){
+    pathdb = data.table::fread(input = pathways) %>% select(Pathway, Gene, OG_TSG)
+    #pathdb = data.table::copy(x = pathways)
+    # colnames(pathdb) = c("Gene", "Pathway")
+    # data.table::setDT(x = pathdb)
+    # pathdb = data.table::fread('pathways_cancer.tsv')
+  }
+  #pathdb = data.table::fread('pathways_cancer.tsv')
+  pathdb_size = as.data.frame(table(pathdb$Pathway))#pathdb[,.N,Pathway]
+  colnames(pathdb_size) <- c('Pathway', 'N')
+  pathdb = split(pathdb, as.factor(pathdb$Pathway))
+
+
+  altered_pws = lapply(pathdb, function(pw){
+                  x = suppressMessages(try(genesToBarcodes(maf = maf, genes = pw$Gene)))
+                  if(class(x) == "try-error"){
+                    pw_genes = NULL
+                  }else{
+                    pw_genes = names(genesToBarcodes(maf = maf, genes = pw$Gene, justNames = TRUE, verbose = FALSE))
+                  }
+                  pw_genes
+                })
+
+  mut_load = lapply(altered_pws, function(x){
+    if(is.null(x)){
+      nsamps =  0
+    }else{
+      nsamps = length(unique(as.character(unlist(
+        genesToBarcodes(
+          maf = maf,
+          genes = x,
+          justNames = TRUE
+        )
+      ))))
+    }
+    nsamps
+  })
+
+  altered_pws = as.data.frame(t(data.frame(lapply(altered_pws, length))))
+  data.table::setDT(x = altered_pws, keep.rownames = TRUE)
+  colnames(altered_pws) = c("Pathway", "n_affected_genes")
+  altered_pws$Pathway = gsub(pattern = "\\.", replacement = "-", x = altered_pws$Pathway)
+  altered_pws = merge(pathdb_size, altered_pws, all.x = TRUE)
+
+  altered_pws <- altered_pws %>% mutate(fraction_affected = n_affected_genes/N) #[, fraction_affected := n_affected_genes/N]
+  altered_pws$Mutated_samples = unlist(mut_load)
+  nsamps = as.numeric(maf@summary[ID == "Samples", summary])
+  altered_pws <- altered_pws %>% mutate(Fraction_mutated_samples = Mutated_samples/nsamps)#[,Fraction_mutated_samples := Mutated_samples/nsamps]
+  altered_pws = altered_pws %>% arrange(Pathway)#altered_pws[order(n_affected_genes, fraction_affected, decreasing = FALSE)]
+
+  #altered_pws = altered_pws[!n_affected_genes %in% 0]
+
+  if(nrow(altered_pws) == 0){
+    stop("None of the provided pathways are altered!")
+  }
+
+  lo = layout(mat = matrix(c(1, 2, 3), ncol = 3, nrow = 1), widths = panelWidths)
+  par(mar = c(1, 0, 1, 1))
+  plot(NA, xlim = c(0, 1), ylim = c(0, nrow(altered_pws)), axes = FALSE)
+  text(x = 1, y = seq(0.5, nrow(altered_pws), by = 1), labels = altered_pws$Pathway, adj = 1, xpd = TRUE, cex = fontSize)
+  title(main = "Pathway", adj = 0)
+  labs(y=NULL)
+
+  par(mar = c(1, 0, 1, 1), xpd = TRUE)
+  plot(NA, xlim = c(0, 1.2), ylim = c(0, nrow(altered_pws)), axes = FALSE)
+  rect(xleft = 0, ybottom = seq(0.1, nrow(altered_pws), by = 1), xright = 1, ytop = seq(0.2, nrow(altered_pws), by = 1)+0.7, col = '#ecf0f1', border = "white")
+  rect(xleft = 0, ybottom = seq(0.1, nrow(altered_pws), by = 1), xright = altered_pws$fraction_affected, ytop = seq(0.2, nrow(altered_pws), by = 1)+0.7, col = "#c0392b", border = "white")
+  text(x = 1.05, y = seq(0.5, nrow(altered_pws), by = 1), labels = paste0(altered_pws$n_affected_genes, "/", altered_pws$N), adj = 0, cex = fontSize)
+  axis(side = 1, at = seq(0, 1, 0.25), line = -1, cex.axis = fontSize)
+  title(main = "Fraction of pathway affected", adj = 0)
+
+  par(mar = c(1, 0, 1, 1), xpd = TRUE)
+  plot(NA, xlim = c(0, 1.2), ylim = c(0, nrow(altered_pws)), axes = FALSE)
+  rect(xleft = 0, ybottom = seq(0.1, nrow(altered_pws), by = 1), xright = 1, ytop = seq(0.2, nrow(altered_pws), by = 1)+0.7, col = '#ecf0f1', border = "white")
+  rect(xleft = 0, ybottom = seq(0.1, nrow(altered_pws), by = 1), xright = altered_pws$Fraction_mutated_samples, ytop = seq(0.2, nrow(altered_pws), by = 1)+0.7, col = "#c0392b", border = "white")
+  text(x = 1.05, y = seq(0.5, nrow(altered_pws), by = 1), labels = paste0(altered_pws$Mutated_samples, "/", nsamps), adj = 0, cex = fontSize)
+  axis(side = 1, at = seq(0, 1, 0.25), line = -1, cex.axis = fontSize)
+  title(main = "Fraction of samples affected")
+
+  altered_pws
+}
+```
+
+```{r}
+oncokb_drugs <- read.csv('oncokb_biomarker_drug_associations-filtered.tsv', sep = '\t') %>% filter(Level != '4')
+onkokb_cancergenelist <- read.csv('cancerGeneList.txt', sep = '\t')
+```
+
+```{r merge_mafs_func}
+my_merge_mafs = function(mafs, verbose = TRUE, clinData, ...){
+
+  if(all(unlist(lapply(mafs, is, "MAF")))){
+
+    if(verbose){
+      cat(paste0("Merging ", length(mafs) ," MAF objects\n"))
+    }
+    mafs_dat = lapply(mafs, function(m) {
+      data.table::rbindlist(l = list(m@data, m@maf.silent), use.names = TRUE, fill = TRUE)
+    })
+    mafs_dat = data.table::rbindlist(l = mafs_dat, fill = TRUE, use.names = TRUE)
+
+    #mafs_clin = lapply(mafs, function(m) {
+    #  m@clinical.data
+    #})
+    #mafs_clin = data.table::rbindlist(l = mafs_clin, fill = TRUE, use.names = TRUE)
+    maf = read.maf(maf = mafs_dat, clinicalData = clinData)
+  }else if(all(unlist(lapply(mafs, is, "data.frame")))){
+    if(verbose){
+      cat(paste0("Merging ", length(mafs) ," MAF data.frames\n"))
+    }
+    mafs_dat = data.table::rbindlist(l = mafs, fill = TRUE, use.names = TRUE)
+    maf = read.maf(maf = mafs_dat, verbose = verbose, ...)
+  }else{
+    if(verbose){
+      cat(paste0("Merging ", length(mafs) ," MAF files\n"))
+    }
+    maf = lapply(mafs, function(x) {
+      x = data.table::fread(x, stringsAsFactors = FALSE, fill = TRUE, showProgress = TRUE, header = TRUE, skip = "Hugo_Symbol")
+
+      required.fields = c(
+        'Hugo_Symbol',
+        'Chromosome',
+        'Start_Position',
+        'End_Position',
+        'Reference_Allele',
+        'Tumor_Seq_Allele2',
+        'Variant_Classification',
+        'Variant_Type',
+        'Tumor_Sample_Barcode'
+      )
+
+      #Change column names to standard names; i.e, camel case
+      for (i in 1:length(required.fields)) {
+        colId = suppressWarnings(grep(
+          pattern = paste("^", required.fields[i], "$", sep = ""),
+          x = colnames(x),
+          ignore.case = TRUE
+        ))
+        if (length(colId) > 0) {
+          colnames(x)[colId] = required.fields[i]
+        }
+      }
+      x
+    })
+    #names(maf) = gsub(pattern = "\\.maf$", replacement = "", x = basename(path = unlist(mafs)), ignore.case = TRUE)
+    names(maf) = basename(mafs)
+    maf = data.table::rbindlist(l = maf, fill = TRUE, idcol = "Source_MAF", use.names = TRUE)
+
+    maf = read.maf(maf = maf, verbose = verbose, ...)
+  }
+
+  maf
+}
+```
+
+# Overview 
+
+Comparing our data to a TCGA bladder carcinoma cohort. Our data uses all sequencing data for 102 tumor samples. 1 sample was excluded due to insufficient read depth. All samples were screened against the mutations from a pool of normals (variants called in our normal samples) and two human SNP databases to filter out probable germline mutations and common SNPs. Additional filtering was applied to remove mutations with >90% or <10% frequency. 
+
+:::: {.row}
+
+::: {.col-md-6}
+  
+#### p22162 exome data
+
+```{r load_vep_mafs, include=FALSE}
+vep_maf <- list()
+for (file in dir(path = "/Volumes/yerkes/genomelab/illumina/runs/Analysis/2022_Analyses/p22162_Lara/exome/p22162_Lara_exome_Processing/vep/", pattern = '*gnomad.maf')){
+  name <- substr(file, 8, 21)
+  if (name != 's087_Emory-104'){
+   df <- read.maf(file.path( "/Volumes/yerkes/genomelab/illumina/runs/Analysis/2022_Analyses/p22162_Lara/exome/p22162_Lara_exome_Processing/vep", file), clinicalData = 'p22162_histologies.txt')
+    df@data$Tumor_Sample_Barcode <- name 
+    vep_maf[[name]] <- read.maf(maf=df@data, clinicalData = 'p22162_histologies.txt')
+  }
+}
+rm(df)
+samples.maf.vep <- my_merge_mafs(vep_maf, clinData = 'p22162_histologies.txt')
+rm(vep_maf)
+```
+
+```{r subset_maf, include = FALSE}
+samples.maf.vep@data$max_af <- as.matrix(samples.maf.vep@data %>% select(colnames(samples.maf.vep@data)[grep('AF', colnames(samples.maf.vep@data))])) %>% rowMaxs(na.rm = TRUE)
+
+samples.maf.vep.gnomad_filtered <- samples.maf.vep@data %>% filter(max_af < 0.001)
+rm(samples.maf.vep)
+samples.maf.tmb <- read.maf(as.data.frame(samples.maf.vep.gnomad_filtered), clinicalData = 'p22162_histologies.txt')
+
+
+samples.maf.vep.subset <- samples.maf.vep.gnomad_filtered %>% filter(!(grepl('tolerated', SIFT))) %>% filter(!(grepl('low_confidence', SIFT))) %>% filter(!(grepl('benign', PolyPhen))) %>% filter(!(grepl('possibly_damaging', PolyPhen)))  %>% filter(!(grepl('unknown', PolyPhen))) %>% filter(!(Variant_Classification %in% c('In_Frame_Del', 'In_Frame_Ins')))
+rm(samples.maf.vep.gnomad_filtered)
+
+samples.maf.vep.subset <- samples.maf.vep.subset %>% mutate(AA_change = substr(HGVSp_Short, 3, 100))
+
+samples.maf <- read.maf(maf = as.data.frame(samples.maf.vep.subset), clinicalData = 'p22162_histologies.txt')
+rm(samples.maf.vep.subset)
+
+#samples.maf@data$NCBI_Build <- 'GRCh38'
+```
+
+Full set of mutations in this cohort, including 'passengers'.
+
+```{r}
+samples.maf.tmb
+```
+
+```{r}
+plotmafSummary(samples.maf.tmb, addStat = 'median', dashboard = TRUE)
+```
+
+<!-- # ```{r, eval = FALSE, include = FALSE} -->
+<!-- # af <- data.frame(x = samples.maf.full@data$tumor_f) -->
+<!-- # ggplot(af) + geom_histogram(aes(x=x), binwidth = 0.01) + theme_bw() + geom_vline(xintercept = 0.1) + labels(x='Allele Frequency', y= 'Count', title = 'Distribution of allele frequencies after filtering') -->
+<!-- # ``` -->
+
+[Oncogenic Signaling Pathways in The Cancer Genome Atlas](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6070353/)
+
+```{r, results='hide', fig.keep='all'}
+my_OncogenicPathways(samples.maf, panelWidths = c(1,3,3))
+```
+
+::: 
+
+::: {.col-md-6}
+
+#### TCGA Bladder carcinoma cohort
+
+Data from https://doi.org/10.1016/j.cels.2018.03.002
+
+```{r, include=FALSE}
+#, message=TRUE}
+bladder_TCGA_cohort <- tcgaLoad('BLCA')
+```
+
+<!-- Histologies in this dataset. Based on [this](https://apps.who.int/iris/bitstream/handle/10665/96612/9789241548496_eng.pdf) reference for ICD-O-3 morphology codes.  -->
+
+<!-- ```{r} -->
+<!-- table(bladder_TCGA_cohort@clinical.data$icd_o_3_histology) -->
+<!-- ``` -->
+
+
+```{r}
+#getSampleSummary(bladder_TCGA_cohort)
+#getGeneSummary(bladder_TCGA_cohort)
+#getClinicalData(bladder_TCGA_cohort)
+```
+
+```{r}
+bladder_TCGA_cohort
+```
+
+
+```{r}
+plotmafSummary(bladder_TCGA_cohort, addStat = 'median', dashboard = TRUE)
+```
+
+<!-- Top mutated genes in the cohort -->
+
+<!-- ```{r} -->
+<!-- oncoplot(bladder_TCGA_cohort) -->
+<!-- ``` -->
+
+[Oncogenic Signaling Pathways in The Cancer Genome Atlas](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6070353/)
+
+```{r, results='hide', fig.keep='all'}
+my_OncogenicPathways(bladder_TCGA_cohort, panelWidths = c(1,3,3))#, pathways = c('NRF2', 'TP53', 'TGF-Beta', 'MYC', 'Cell_Cycle', 'PI3K', 'Hippo', 'WNT', 'NOTCH', 'RTK-RAS'))
+#PlotOncogenicPathways(bladder_TCGA_cohort, pathways = c('NRF2', 'TP53', 'TGF-Beta', 'MYC', 'Cell_Cycle', 'PI3K', 'Hippo', 'WNT', 'NOTCH', 'RTK-RAS'))
+```
+
+:::
+  
+::::
+
+
+## Comparing the two
+
+Comparing mutation distribution of our dataset to various TCGA datasets. BLCA is the urothelial bladder carcinoma cohort. The y axis is Total Mutation Burden. We still have a slightly higher TMB per sample, likely due to using fewer variant callers, but we are in the same general range. 
+
+```{r, results='hide', fig.keep='all', warning=FALSE}
+tcgaCompare(samples.maf.tmb, cohortName = 'p22162_Lara', capture_size = 42.988611)
+```
+
+Genes that are enriched in one cohort over the other. 
+
+```{r}
+comp <- mafCompare(bladder_TCGA_cohort, samples.maf, m1Name = 'TCGA', m2Name = 'p22162_Lara', minMut = 25)
+datatable(comp$results %>% select(Hugo_Symbol, TCGA, p22162_Lara, pval, adjPval) %>% filter(adjPval < 0.05) %>% arrange(p22162_Lara) %>% mutate_if(is.numeric, round, 5), rownames=FALSE, caption = paste0('TCGA and p22162_Lara columns show how many samples have mutations for that gene. The TCGA dataset has 412 samples, and ours has ', comp$SampleSummary$SampleSize[2]), options(digits = 3))
+```
+
+
+# Within histology analyses
+
+Focusing on just our data, we are now breaking down the dataset by histology and focusing on deleterious/damaging mutations. For each histology with sufficient samples, we examine the following: 
+
+**Overview:** Looking at the tumor mutation burden (not filtered for predicted impact). If possible, representative TCGA datasets will also be included for comparison. 
+
+<!-- **Oncodrivers:** Detecting significantly mutated genes based on the fact that most of the variants in cancer causing genes are enriched at few specific loci (aka hotspots). This method takes advantage of such positions to identify cancer genes. Cluster score of 1 means a single hotspot hosts all observed variants. See the following publication for more information: [OncodriveCLUST: exploiting the positional clustering of somatic mutations to identify cancer genes](https://pubmed.ncbi.nlm.nih.gov/23884480/) -->
+
+<!-- **Gene Interactions**: Looking for genes that co-mutate or exclusively mutate.  -->
+
+**Pathway enrichment:** Enrichment of known general biological pathways from MSigDB and [Oncogenic Signaling Pathways in The Cancer Genome Atlas](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6070353/).
+
+**OncoKB hits:** Gene / mutation combos that were found by an OncoKB query.
+
+<!--[oncogenic signature gene sets](http://www.gsea-msigdb.org/gsea/msigdb/human/collection_details.jsp#C6), -->
+
+**Drugs:** Plugging all mutated genes into OncoKB to search for drug interactions
+
+## Sarcomatoid
+
+### Overview
+
+:::: {.row}
+
+::: {.col-md-6}
+
+#### Our data
+
+```{r, include=FALSE}
+samples.maf.sarcomatoid <- subsetMaf(maf = samples.maf, clinQuery = "HISTOLOGY == 'sarcomatoid'")
+samples.maf.sarcomatoid.tmb <- subsetMaf(maf = samples.maf.tmb, clinQuery = "HISTOLOGY == 'sarcomatoid'")
+```
+
+
+```{r}
+plotmafSummary(samples.maf.sarcomatoid,addStat = 'median', dashboard = TRUE)
+```
+
+::: 
+
+::: {.col-md-6}
+
+#### Squamous lung samples
+
+```{r, include = FALSE}
+sarcoma_cohort <- tcgaLoad('SARC')
+```
+
+```{r}
+sarcoma_cohort
+```
+
+```{r}
+plotmafSummary(sarcoma_cohort,addStat = 'median', dashboard = TRUE)
+```
+
+:::
+
+::::
+
+### Pathway enrichment
+
+```{r, eval=TRUE, results='hide', fig.keep='all', fig.height=8, fig.width=12}
+my_OncogenicPathways(samples.maf.sarcomatoid, pathdb='custom', pathways = 'pathways_cancer.tsv') 
+```
+
+```{r, results='hide', fig.keep='all'}
+my_OncogenicPathways(samples.maf.sarcomatoid, panelWidths = c(1,3,3))
+```
+
+```{r, eval = FALSE}
+enrich_results <- enricher(
+  unname(unlist(samples.maf.sarcomatoid.oncogenes %>% filter(fdr<=0.05) %>% select(Hugo_Symbol))),
+  pvalueCutoff = 0.1,
+  TERM2GENE = stack(pathways.core) %>% select(ind, values),
+  universe = samples.maf@data$Hugo_Symbol
+)
+
+enrich_results@result %>% mutate_if(is.numeric, round, 3) %>% filter(Count>1)  %>% mutate(Source = str_extract(Description, '^[^_]+'), Description = gsub(pattern = '^[^_]+_', replacement = '', Description ))%>%  select(Description, GeneRatio, BgRatio, pvalue, p.adjust, Source, geneID) %>% datatable(rownames=FALSE, filter='top', caption='General pathways')
+```
+
+### OncoKB
+
+```{r, cache=TRUE}
+onco_kb_searchterms.sarcomatoid <- samples.maf.sarcomatoid@data %>% 
+  select(Hugo_Symbol, AA_change, Tumor_Sample_Barcode) %>% 
+  group_by(Hugo_Symbol, AA_change) %>% 
+  mutate(samples = paste0('E', substr(as.character(Tumor_Sample_Barcode),12,15)), .keep='unused') %>% 
+  summarize(samples = paste0(unique(samples), collapse = ', ')) 
+  ## old way
+  #samples.maf.sarcomatoid@data %>% dplyr::count(Hugo_Symbol, AA_change) %>% arrange(n) 
+
+oncokb_res.sarcomatoid <- mapply(query_oncokb_api_check,
+                     onco_kb_searchterms.sarcomatoid$Hugo_Symbol, 
+                     onco_kb_searchterms.sarcomatoid$AA_change)
+
+oncokb_res.sarcomatoid <- cbind(onco_kb_searchterms.sarcomatoid, stack(oncokb_res.sarcomatoid))
+
+oncokb_res.sarcomatoid <- oncokb_res.sarcomatoid %>% 
+  filter(grepl('Oncogenic', values, ignore.case=TRUE)) %>% 
+  select(Hugo_Symbol, AA_change, values, samples) #%>%  arrange(desc(n)) 
+datatable(oncokb_res.sarcomatoid, colnames = c('Gene', 'Mutation', 'OncoKB result', 'Affected sample IDs'), options = list(searching = FALSE), rownames = FALSE)
+write.csv(oncokb_res.sarcomatoid, file = 'outputs/sarcomatoid_oncokb.csv',
+            row.names = FALSE)
+```
+
+### Drugs
+
+```{r, cache=TRUE}
+oncokb_drug_res.sarcomatoid <- mapply(query_oncokb_api_drug,
+                          oncokb_res.sarcomatoid$Hugo_Symbol,
+                          oncokb_res.sarcomatoid$AA_change)
+
+if (class(oncokb_drug_res.sarcomatoid) == 'logical'){
+  print('No drug treatments found')
+} else {
+  oncokb_drug_res.sarcomatoid <- do.call(rbind, oncokb_drug_res.sarcomatoid) %>% 
+                     na.omit() %>% 
+                     distinct()
+affected_samples <- list()
+for (row in 1:nrow(oncokb_drug_res.sarcomatoid)){
+  if (grepl('Oncogenic Mutations',oncokb_drug_res.sarcomatoid[row,'alterations'])){
+    samples <- oncokb_res.sarcomatoid %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.sarcomatoid[row,'gene']) %>% 
+      select(samples) %>%
+      paste0(collapse = ', ')
+    samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '.\\d+'))), collapse = ', ')
+    affected_samples <- append(affected_samples, samples)
+  } else {
+    alterations <- unlist(oncokb_drug_res.sarcomatoid[row,'alterations'])
+    samples <- oncokb_res.sarcomatoid %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.sarcomatoid[row,'gene']) %>% 
+      filter(AA_change %in% alterations) %>%
+      select(samples)
+    if (length(samples) > 0){
+      samples <- paste0(samples, collapse = ', ')
+      samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '.\\d+'))), collapse = ', ')
+      affected_samples <- append(affected_samples, samples)
+    } else {
+      affected_samples <- append(affected_samples, NA)
+    }
+  }
+}
+oncokb_drug_res.sarcomatoid$affected_samples <- affected_samples
+oncokb_drug_res.sarcomatoid <- oncokb_drug_res.sarcomatoid %>% select(-levelExcludedCancerTypes) %>% select(affected_samples, drugName, level, fdaLevel, gene, alterations, levelAssociatedCancerType.mainType.name) %>% na.omit()
+
+datatable(oncokb_drug_res.sarcomatoid, rownames = FALSE, colnames = c('Affected Samples', 'Drug(s) Treatment', 'Level', 'FDA level','Gene', 'Alteration(s)',  'Associated Cancer Type' ), filter = 'top')#, caption = 'Excluded cancer types may appear for drugs associated with "All Tumor Types"')
+}
+oncokb_drug_res.sarcomatoid <- apply(oncokb_drug_res.sarcomatoid,2,as.character)
+write.csv(oncokb_drug_res.sarcomatoid, file = 'outputs/sarcomatoid_drugs.csv',
+            row.names = FALSE)
+```
+
+```{r, include = FALSE}
+knitr::kable(oncokb_drug_res.sarcomatoid, rownames = FALSE, colnames = c('Affected Samples', 'Drug(s) Treatment', 'Level', 'FDA level','Gene', 'Alteration(s)',  'Associated Cancer Type'))
+```
+
+
+```{r}
+# oncokb_drug_res.sarcomatoid %>% 
+#   select(gene, drugName, level) %>% 
+#   mutate(drugs = sapply(drugName, str_c, collapse = ',')) %>% 
+#   group_by(gene, level) %>% 
+#   summarise(drugs = paste0(drugs, collapse = '; ')) %>% mutate(patients = c()) %>% 
+#   knitr::kable(col.names = c('Gene', 'Level', 'Treatments', '# affected samples'), caption = 'Multiple treatments may be present for the same gene/level. These will be separated by semicolons. Some treatments may involve several drugs. Drugs for the same treatment are separated by commas.')
+```
+
+## Squamous
+
+### Overview
+
+:::: {.row}
+
+::: {.col-md-6}
+
+#### Our data
+
+```{r, include=FALSE}
+samples.maf.squamous <- subsetMaf(maf = samples.maf, clinQuery = "HISTOLOGY == 'squamous'")
+```
+
+```{r}
+samples.maf.squamous
+```
+
+```{r}
+plotmafSummary(samples.maf.squamous, addStat = 'median', dashboard = TRUE)
+```
+
+::: 
+
+::: {.col-md-6}
+
+#### Squamous lung samples
+
+```{r, include = FALSE}
+lung_squamous_cohort <- tcgaLoad('LUSC')
+```
+
+```{r}
+lung_squamous_cohort
+```
+
+```{r}
+plotmafSummary(lung_squamous_cohort,addStat = 'median', dashboard = TRUE)
+```
+
+:::
+
+::::
+
+### Pathway enrichment
+
+```{r, eval=TRUE, results='hide', fig.keep='all', fig.height=8, fig.width=12}
+my_OncogenicPathways(samples.maf.squamous, pathdb='custom', pathways = 'pathways_cancer.tsv')
+```
+
+```{r, results='hide', fig.keep='all'}
+my_OncogenicPathways(samples.maf.squamous, panelWidths = c(1,3,3))
+```
+
+```{r, eval = FALSE}
+enrich_results <- enricher(
+  unname(unlist(samples.maf.squamous.oncogenes %>% filter(fdr<=0.05) %>% select(Hugo_Symbol))),
+  pvalueCutoff = 0.1,
+  TERM2GENE = stack(pathways.core) %>% select(ind, values),
+  universe = samples.maf@data$Hugo_Symbol
+)
+
+enrich_results@result %>% mutate_if(is.numeric, round, 3) %>% filter(Count>1)  %>% mutate(Source = str_extract(Description, '^[^_]+'), Description = gsub(pattern = '^[^_]+_', replacement = '', Description ))%>%  select(Description, GeneRatio, BgRatio, pvalue, p.adjust, Source, geneID) %>% datatable(rownames=FALSE, filter='top', caption='General pathways')
+```
+
+### OncoKB
+
+```{r, cache=TRUE}
+onco_kb_searchterms.squamous <- samples.maf.squamous@data %>% 
+  select(Hugo_Symbol, AA_change, Tumor_Sample_Barcode) %>% 
+  group_by(Hugo_Symbol, AA_change) %>% 
+  mutate(samples = paste0('E', substr(as.character(Tumor_Sample_Barcode),12,15)), .keep='unused') %>% 
+  summarize(samples = paste0(unique(samples), collapse = ', ')) 
+  ## old way
+  #samples.maf.squamous@data %>% dplyr::count(Hugo_Symbol, AA_change) %>% arrange(n) 
+
+oncokb_res.squamous <- mapply(query_oncokb_api_check,
+                     onco_kb_searchterms.squamous$Hugo_Symbol, 
+                     onco_kb_searchterms.squamous$AA_change)
+
+oncokb_res.squamous <- cbind(onco_kb_searchterms.squamous, stack(oncokb_res.squamous))
+
+oncokb_res.squamous <- oncokb_res.squamous %>% 
+  filter(grepl('Oncogenic', values, ignore.case=TRUE)) %>% 
+  select(Hugo_Symbol, AA_change, values, samples) #%>%  arrange(desc(n)) 
+datatable(oncokb_res.squamous, colnames = c('Gene', 'Mutation', 'OncoKB result', 'Affected sample IDs'), options = list(searching = FALSE), rownames = FALSE)
+write.csv(oncokb_res.squamous, file = 'outputs/squamous_oncokb.csv',
+            row.names = FALSE)
+```
+
+### Drugs
+
+```{r, cache=TRUE, cache.rebuild=TRUE}
+oncokb_drug_res.squamous <- mapply(query_oncokb_api_drug,
+                          oncokb_res.squamous$Hugo_Symbol,
+                          oncokb_res.squamous$AA_change)
+
+if (class(oncokb_drug_res.squamous) == 'logical'){
+  print('No drug treatments found')
+} else {
+  oncokb_drug_res.squamous <- do.call(rbind, oncokb_drug_res.squamous) %>% 
+                     na.omit() %>% 
+                     distinct()
+affected_samples <- list()
+for (row in 1:nrow(oncokb_drug_res.squamous)){
+  if (grepl('Oncogenic Mutations',oncokb_drug_res.squamous[row,'alterations'])){
+    samples <- oncokb_res.squamous %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.squamous[row,'gene']) %>% 
+      select(samples) %>%
+      paste0(collapse = ', ')
+    samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '.\\d+'))), collapse = ', ')
+    affected_samples <- append(affected_samples, samples)
+  } else {
+    alterations <- unlist(oncokb_drug_res.squamous[row,'alterations'])
+    samples <- oncokb_res.squamous %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.squamous[row,'gene']) %>% 
+      filter(AA_change %in% alterations) %>%
+      select(samples)
+    if (length(samples) > 0){
+      samples <- paste0(samples, collapse = ', ')
+      samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '\\d+'))), collapse = ', ')
+      affected_samples <- append(affected_samples, samples)
+    } else {
+      affected_samples <- append(affected_samples, NA)
+    }
+  }
+}
+oncokb_drug_res.squamous$affected_samples <- affected_samples
+oncokb_drug_res.squamous <- oncokb_drug_res.squamous %>% select(-levelExcludedCancerTypes) %>% select(affected_samples, drugName, level, fdaLevel, gene, alterations, levelAssociatedCancerType.mainType.name) %>% na.omit()
+
+datatable(oncokb_drug_res.squamous, rownames = FALSE, colnames = c('Affected Samples', 'Drug(s) Treatment', 'Level', 'FDA level','Gene', 'Alteration(s)',  'Associated Cancer Type' ), filter = 'top')#, caption = 'Excluded cancer types may appear for drugs associated with "All Tumor Types"')
+}
+oncokb_drug_res.squamous <- apply(oncokb_drug_res.squamous,2,as.character)
+write.csv(oncokb_drug_res.squamous, file = 'outputs/squamous_drugs.csv',
+            row.names = FALSE)
+```
+
+
+## Adeno
+
+### Overview
+
+:::: {.row}
+
+::: {.col-md-6}
+
+#### Our data
+
+```{r, include = FALSE}
+samples.maf.adeno <- subsetMaf(maf = samples.maf, clinQuery = "HISTOLOGY == 'adeno'")
+```
+
+```{r}
+samples.maf.adeno
+```
+
+```{r}
+plotmafSummary(samples.maf.adeno, addStat = 'median', dashboard = TRUE)
+```
+
+::: 
+
+::: {.col-md-6}
+
+#### Adeno lung samples
+
+```{r, include = FALSE}
+lung_adeno_cohort <- tcgaLoad('STAD')
+```
+
+```{r}
+lung_adeno_cohort
+```
+
+```{r}
+plotmafSummary(lung_adeno_cohort,addStat = 'median', dashboard = TRUE)
+```
+
+### Pathway enrichment
+
+```{r, eval=TRUE, results='hide', fig.keep='all', fig.height=8, fig.width=12}
+my_OncogenicPathways(samples.maf.adeno, pathdb='custom', pathways = 'pathways_cancer.tsv')
+```
+
+```{r, results='hide', fig.keep='all'}
+my_OncogenicPathways(samples.maf.adeno, panelWidths = c(1,3,3))
+```
+
+```{r, eval = FALSE}
+enrich_results <- enricher(
+  unname(unlist(samples.maf.adeno.oncogenes %>% filter(fdr<=0.05) %>% select(Hugo_Symbol))),
+  pvalueCutoff = 0.1,
+  TERM2GENE = stack(pathways.core) %>% select(ind, values),
+  universe = samples.maf@data$Hugo_Symbol
+)
+
+enrich_results@result %>% mutate_if(is.numeric, round, 3) %>% filter(Count>1)  %>% mutate(Source = str_extract(Description, '^[^_]+'), Description = gsub(pattern = '^[^_]+_', replacement = '', Description ))%>%  select(Description, GeneRatio, BgRatio, pvalue, p.adjust, Source, geneID) %>% datatable(rownames=FALSE, filter='top', caption='General pathways')
+```
+
+### OncoKB
+
+```{r, cache=TRUE}
+onco_kb_searchterms.adeno <- samples.maf.adeno@data %>% 
+  select(Hugo_Symbol, AA_change, Tumor_Sample_Barcode) %>% 
+  group_by(Hugo_Symbol, AA_change) %>% 
+  mutate(samples = paste0('E', substr(as.character(Tumor_Sample_Barcode),12,15)), .keep='unused') %>% 
+  summarize(samples = paste0(unique(samples), collapse = ', ')) 
+  ## old way
+  #samples.maf.adeno@data %>% dplyr::count(Hugo_Symbol, AA_change) %>% arrange(n) 
+
+oncokb_res.adeno <- mapply(query_oncokb_api_check,
+                     onco_kb_searchterms.adeno$Hugo_Symbol, 
+                     onco_kb_searchterms.adeno$AA_change)
+
+oncokb_res.adeno <- cbind(onco_kb_searchterms.adeno, stack(oncokb_res.adeno))
+
+oncokb_res.adeno <- oncokb_res.adeno %>% 
+  filter(grepl('Oncogenic', values, ignore.case=TRUE)) %>% 
+  select(Hugo_Symbol, AA_change, values, samples) #%>%  arrange(desc(n)) 
+datatable(oncokb_res.adeno, colnames = c('Gene', 'Mutation', 'OncoKB result', 'Affected sample IDs'), options = list(searching = FALSE), rownames = FALSE)
+write.csv(oncokb_res.adeno, file = 'outputs/adeno_oncokb.csv',
+            row.names = FALSE)
+```
+
+### Drugs
+
+```{r, cache=TRUE}
+oncokb_drug_res.adeno <- mapply(query_oncokb_api_drug,
+                          oncokb_res.adeno$Hugo_Symbol,
+                          oncokb_res.adeno$AA_change)
+
+if (class(oncokb_drug_res.adeno) == 'logical'){
+  print('No drug treatments found')
+} else {
+  oncokb_drug_res.adeno <- do.call(rbind, oncokb_drug_res.adeno) %>% 
+                     na.omit() %>% 
+                     distinct()
+affected_samples <- list()
+for (row in 1:nrow(oncokb_drug_res.adeno)){
+  if (grepl('Oncogenic Mutations',oncokb_drug_res.adeno[row,'alterations'])){
+    samples <- oncokb_res.adeno %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.adeno[row,'gene']) %>% 
+      select(samples) %>%
+      paste0(collapse = ', ')
+    samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '.\\d+'))), collapse = ', ')
+    affected_samples <- append(affected_samples, samples)
+  } else {
+    alterations <- unlist(oncokb_drug_res.adeno[row,'alterations'])
+    samples <- oncokb_res.adeno %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.adeno[row,'gene']) %>% 
+      filter(AA_change %in% alterations) %>%
+      select(samples)
+    if (length(samples) > 0){
+      samples <- paste0(samples, collapse = ', ')
+      samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '.\\d+'))), collapse = ', ')
+      affected_samples <- append(affected_samples, samples)
+    } else {
+      affected_samples <- append(affected_samples, NA)
+    }
+  }
+}
+oncokb_drug_res.adeno$affected_samples <- affected_samples
+oncokb_drug_res.adeno <- oncokb_drug_res.adeno %>% select(-levelExcludedCancerTypes) %>% select(affected_samples, drugName, level, fdaLevel, gene, alterations, levelAssociatedCancerType.mainType.name) %>% na.omit()
+
+datatable(oncokb_drug_res.adeno, rownames = FALSE, colnames = c('Affected Samples', 'Drug(s) Treatment', 'Level', 'FDA level','Gene', 'Alteration(s)',  'Associated Cancer Type' ), filter = 'top')#, caption = 'Excluded cancer types may appear for drugs associated with "All Tumor Types"')
+}
+```
+
+## Plasmacytoid
+
+### Overview
+
+```{r, include = FALSE}
+samples.maf.plasmacytoid <- subsetMaf(maf = samples.maf, clinQuery = "HISTOLOGY == 'plasmacytoid'")
+```
+
+```{r}
+samples.maf.plasmacytoid
+```
+
+
+```{r}
+oncoplot(samples.maf.plasmacytoid)
+```
+
+### Pathway enrichment
+
+```{r, eval=TRUE, results='hide', fig.keep='all', fig.height=8, fig.width=12}
+my_OncogenicPathways(samples.maf.plasmacytoid, pathdb='custom', pathways = 'pathways_cancer.tsv')
+```
+
+```{r, results='hide', fig.keep='all'}
+my_OncogenicPathways(samples.maf.plasmacytoid, panelWidths = c(1,3,3))
+```
+
+```{r, eval = FALSE}
+enrich_results <- enricher(
+  unname(unlist(samples.maf.plasmacytoid.oncogenes %>% filter(fdr<=0.05) %>% select(Hugo_Symbol))),
+  pvalueCutoff = 0.1,
+  TERM2GENE = stack(pathways.core) %>% select(ind, values),
+  universe = samples.maf@data$Hugo_Symbol
+)
+
+enrich_results@result %>% mutate_if(is.numeric, round, 3) %>% filter(Count>1)  %>% mutate(Source = str_extract(Description, '^[^_]+'), Description = gsub(pattern = '^[^_]+_', replacement = '', Description ))%>%  select(Description, GeneRatio, BgRatio, pvalue, p.adjust, Source, geneID) %>% datatable(rownames=FALSE, filter='top', caption='General pathways')
+```
+
+### OncoKB
+
+```{r, cache=TRUE}
+onco_kb_searchterms.plasmacytoid <- samples.maf.plasmacytoid@data %>% 
+  select(Hugo_Symbol, AA_change, Tumor_Sample_Barcode) %>% 
+  group_by(Hugo_Symbol, AA_change) %>% 
+  mutate(samples = paste0('E', substr(as.character(Tumor_Sample_Barcode),12,15)), .keep='unused') %>% 
+  summarize(samples = paste0(unique(samples), collapse = ', ')) 
+  ## old way
+  #samples.maf.plasmacytoid@data %>% dplyr::count(Hugo_Symbol, AA_change) %>% arrange(n) 
+
+oncokb_res.plasmacytoid <- mapply(query_oncokb_api_check,
+                     onco_kb_searchterms.plasmacytoid$Hugo_Symbol, 
+                     onco_kb_searchterms.plasmacytoid$AA_change)
+
+oncokb_res.plasmacytoid <- cbind(onco_kb_searchterms.plasmacytoid, stack(oncokb_res.plasmacytoid))
+
+oncokb_res.plasmacytoid <- oncokb_res.plasmacytoid %>% 
+  filter(grepl('Oncogenic', values, ignore.case=TRUE)) %>% 
+  select(Hugo_Symbol, AA_change, values, samples) #%>%  arrange(desc(n)) 
+datatable(oncokb_res.plasmacytoid, colnames = c('Gene', 'Mutation', 'OncoKB result', 'Affected sample IDs'), options = list(searching = FALSE), rownames = FALSE)
+write.csv(oncokb_res.plasmacytoid, file = 'outputs/plasmacytoid_oncokb.csv',
+            row.names = FALSE)
+```
+
+### Drugs
+
+```{r, cache=TRUE}
+oncokb_drug_res.plasmacytoid <- mapply(query_oncokb_api_drug,
+                          oncokb_res.plasmacytoid$Hugo_Symbol,
+                          oncokb_res.plasmacytoid$AA_change)
+
+if (class(oncokb_drug_res.plasmacytoid) == 'logical'){
+  print('No drug treatments found')
+} else {
+  oncokb_drug_res.plasmacytoid <- do.call(rbind, oncokb_drug_res.plasmacytoid) %>% 
+                     na.omit() %>% 
+                     distinct()
+affected_samples <- list()
+for (row in 1:nrow(oncokb_drug_res.plasmacytoid)){
+  if (grepl('Oncogenic Mutations', oncokb_drug_res.plasmacytoid[row,'alterations'])){
+    samples <- oncokb_res.plasmacytoid %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.plasmacytoid[row,'gene']) %>% 
+      select(samples) %>%
+      paste0(collapse = ', ')
+    samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '.\\d+'))), collapse = ', ')
+    affected_samples <- append(affected_samples, samples)
+  } else {
+    alterations <- unlist(oncokb_drug_res.plasmacytoid[row,'alterations'])
+    samples <- oncokb_res.plasmacytoid %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.plasmacytoid[row,'gene']) %>% 
+      filter(AA_change %in% alterations) %>%
+      select(samples)
+    if (length(samples) > 0){
+      samples <- paste0(samples, collapse = ', ')
+      samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '.\\d+'))), collapse = ', ')
+      affected_samples <- append(affected_samples, samples)
+    } else {
+      affected_samples <- append(affected_samples, NA)
+    }
+  }
+}
+oncokb_drug_res.plasmacytoid$affected_samples <- affected_samples
+oncokb_drug_res.plasmacytoid <- oncokb_drug_res.plasmacytoid %>% select(-levelExcludedCancerTypes) %>% select(affected_samples, drugName, level, fdaLevel, gene, alterations, levelAssociatedCancerType.mainType.name) %>% na.omit()
+
+datatable(oncokb_drug_res.plasmacytoid, rownames = FALSE, colnames = c('Affected Samples', 'Drug(s) Treatment', 'Level', 'FDA level','Gene', 'Alteration(s)',  'Associated Cancer Type' ), filter = 'top')#, caption = 'Excluded cancer types may appear for drugs associated with "All Tumor Types"')
+}
+oncokb_drug_res.plasmacytoid <- apply(oncokb_drug_res.plasmacytoid,2,as.character)
+write.csv(oncokb_drug_res.plasmacytoid, file = 'outputs/plasmacytoid_drugs.csv',
+            row.names = FALSE)
+```
+
+
+## Small cell 
+
+### Overview
+
+```{r, include = FALSE}
+samples.maf.sc <- subsetMaf(maf = samples.maf, clinQuery = "HISTOLOGY == 'small cell'")
+```
+
+```{r}
+samples.maf.sc
+```
+
+
+```{r}
+oncoplot(samples.maf.sc)
+```
+
+### Pathway enrichment
+
+```{r, eval=TRUE, results='hide', fig.keep='all', fig.height=8, fig.width=12}
+my_OncogenicPathways(samples.maf.sc, pathdb='custom', pathways = 'pathways_cancer.tsv')
+```
+
+```{r, results='hide', fig.keep='all'}
+my_OncogenicPathways(samples.maf.sc, panelWidths = c(1,3,3))
+```
+
+```{r, eval = FALSE}
+enrich_results <- enricher(
+  unname(unlist(samples.maf.sc.oncogenes %>% filter(fdr<=0.05) %>% select(Hugo_Symbol))),
+  pvalueCutoff = 0.1,
+  TERM2GENE = stack(pathways.core) %>% select(ind, values),
+  universe = samples.maf@data$Hugo_Symbol
+)
+
+enrich_results@result %>% mutate_if(is.numeric, round, 3) %>% filter(Count>1)  %>% mutate(Source = str_extract(Description, '^[^_]+'), Description = gsub(pattern = '^[^_]+_', replacement = '', Description ))%>%  select(Description, GeneRatio, BgRatio, pvalue, p.adjust, Source, geneID) %>% datatable(rownames=FALSE, filter='top', caption='General pathways')
+```
+
+### OncoKB
+
+```{r, cache=TRUE}
+onco_kb_searchterms.sc <- samples.maf.sc@data %>% 
+  select(Hugo_Symbol, AA_change, Tumor_Sample_Barcode) %>% 
+  group_by(Hugo_Symbol, AA_change) %>% 
+  mutate(samples = paste0('E', substr(as.character(Tumor_Sample_Barcode),12,15)), .keep='unused') %>% 
+  summarize(samples = paste0(unique(samples), collapse = ', ')) 
+  ## old way
+  #samples.maf.sc@data %>% dplyr::count(Hugo_Symbol, AA_change) %>% arrange(n) 
+
+oncokb_res.sc <- mapply(query_oncokb_api_check,
+                     onco_kb_searchterms.sc$Hugo_Symbol, 
+                     onco_kb_searchterms.sc$AA_change)
+
+oncokb_res.sc <- cbind(onco_kb_searchterms.sc, stack(oncokb_res.sc))
+
+oncokb_res.sc <- oncokb_res.sc %>% 
+  filter(grepl('Oncogenic', values, ignore.case=TRUE)) %>% 
+  select(Hugo_Symbol, AA_change, values, samples) #%>%  arrange(desc(n)) 
+datatable(oncokb_res.sc, colnames = c('Gene', 'Mutation', 'OncoKB result', 'Affected sample IDs'), options = list(searching = FALSE), rownames = FALSE)
+write.csv(oncokb_res.sc, file = 'outputs/sc_oncokb.csv',
+            row.names = FALSE)
+```
+
+### Drugs
+
+```{r, cache=TRUE}
+oncokb_drug_res.sc <- mapply(query_oncokb_api_drug,
+                          oncokb_res.sc$Hugo_Symbol,
+                          oncokb_res.sc$AA_change)
+
+if (class(oncokb_drug_res.sc) == 'logical'){
+  print('No drug treatments found')
+} else {
+  oncokb_drug_res.sc <- do.call(rbind, oncokb_drug_res.sc) %>% 
+                     na.omit() %>% 
+                     distinct()
+affected_samples <- list()
+for (row in 1:nrow(oncokb_drug_res.sc)){
+  if (grepl('Oncogenic Mutations',oncokb_drug_res.sc[row,'alterations'])){
+    samples <- oncokb_res.sc %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.sc[row,'gene']) %>% 
+      select(samples) %>%
+      paste0(collapse = ', ')
+    samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '.\\d+'))), collapse = ', ')
+    affected_samples <- append(affected_samples, samples)
+  } else {
+    alterations <- unlist(oncokb_drug_res.sc[row,'alterations'])
+    samples <- oncokb_res.sc %>% 
+      as.data.frame() %>%
+      filter(Hugo_Symbol == oncokb_drug_res.sc[row,'gene']) %>% 
+      filter(AA_change %in% alterations) %>%
+      select(samples)
+    if (length(samples) > 0){
+      samples <- paste0(samples, collapse = ', ')
+      samples <- paste0(unique(unlist(str_extract_all(samples, pattern = '.\\d+'))), collapse = ', ')
+      affected_samples <- append(affected_samples, samples)
+    } else {
+      affected_samples <- append(affected_samples, NA)
+    }
+  }
+}
+oncokb_drug_res.sc$affected_samples <- affected_samples
+oncokb_drug_res.sc <- oncokb_drug_res.sc %>% select(-levelExcludedCancerTypes) %>% select(affected_samples, drugName, level, fdaLevel, gene, alterations, levelAssociatedCancerType.mainType.name) %>% na.omit()
+
+datatable(oncokb_drug_res.sc, rownames = FALSE, colnames = c('Affected Samples', 'Drug(s) Treatment', 'Level', 'FDA level','Gene', 'Alteration(s)',  'Associated Cancer Type' ), filter = 'top')#, caption = 'Excluded cancer types may appear for drugs associated with "All Tumor Types"')
+}
+```
+
+
+# Histology specific enrichment
+
+Comparing histologies to all other samples to find genes that are more or less mutated in particular histologies.
+
+```{r}
+fab.ce = clinicalEnrichment(maf = samples.maf, clinicalFeature = 'HISTOLOGY')
+# samples.maf.main_histologies <- subsetMaf(samples.maf, clinQuery = "HISTOLOGY %in% c('squamous', 'adeno', 'plasmacytoid', 'sarcomatoid', 'small cell')")
+# test <- clinicalEnrichment(maf = samples.maf.main_histologies, clinicalFeature = 'HISTOLOGY')
+```
+
+```{r}
+top_DMG <- fab.ce$groupwise_comparision %>% group_by(Group1) %>% filter(Group1 %in% c('adeno','sarcomatoid', 'squamous', 'plasmacytoid', 'small cell')) %>% arrange(p_value) %>% filter(OR > 1) %>% filter(p_value < 0.1)
+
+top_DMG$OncoKB_query_res <- mapply(query_oncokb_api_check, top_DMG$Hugo_Symbol, '')
+
+datatable(top_DMG %>% select(Hugo_Symbol, Group1, n_mutated_group1, n_mutated_group2, p_value, fdr) %>% mutate_if(is.numeric, round, 5), rownames = FALSE, colnames=c('Gene', 'Histology', 'N mutated in histology', 'N mutated outside histology', 'P value', 'FDR'))
+```
+
+<!-- ## Histology specific drug targets -->
+
+<!-- Now plugging in all genes pulled from the select OncoKB database and checking for histology specific enrichment. I filtered for positive odds ratios (only looking at genes enriched within a histology, not depleted) and p-value < 0.15. -->
+
+<!-- ```{r} -->
+<!-- histology_specific_actionable_genes <- fab.ce$groupwise_comparision %>% filter(Hugo_Symbol %in% unique(oncokb_drugs$Gene)) %>% filter(Group1 %in% c('adeno','sarcomatoid', 'squamous', 'plasmacytoid', 'small cell')) %>% arrange(p_value) %>% mutate_if(is.numeric, round, 3) %>% filter(OR>1) %>% filter(p_value <=0.15)  -->
+
+<!-- histology_specific_actionable_genes %>% datatable(rownames=FALSE, colnames=c('Gene', 'Group1', 'Group2', 'N mutated in Group1', 'N mutated outside group', 'P value', 'Odds ratio', 'OR low', 'OR high', 'FDR'), caption = 'Genes matching search criteria found in OncoKB') -->
+<!-- #oncokb.maf <- subsetMaf(samples.maf, genes = unique(unlist(oncokb_genelist))) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- oncokb_drugs %>% filter(Gene %in% histology_specific_actionable_genes$Hugo_Symbol) %>% datatable(rownames=FALSE, colnames=c('Level', 'Gene', 'Alterations', 'Cancer Types', 'Drugs'), filter='top', caption = 'OncoKB matches') -->
+<!-- ``` -->
+
+<!-- ```{r, results='hide', fig.keep='all'} -->
+<!-- #lollipopPlot2(samples.maf.squamous, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'squamous'"), gene = 'BRCA2', showDomainLabel = FALSE, pointSize = 1, verbose = FALSE, m1_name = 'squamous', m2_name = 'non-squamous', m1_label = 'all') -->
+<!-- lollipopPlot2(samples.maf.squamous, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'squamous'"), gene = 'PIK3CA', showDomainLabel = FALSE, pointSize = 1, verbose = FALSE, m1_name = 'squamous', m2_name = 'non-squamous', m1_label = 'all') -->
+<!-- #lollipopPlot2(samples.maf.plasmacytoid, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'plasmacytoid'"), gene = 'CDK12', showDomainLabel = FALSE, pointSize = 1, verbose = FALSE, m1_name = 'plasmacytoid', m2_name = 'non-plasmacytoid', m1_label = 'all') -->
+<!-- #lollipopPlot2(samples.maf.adeno, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'adeno'"), gene = 'NF1', showDomainLabel = FALSE, pointSize = 1, verbose = FALSE, m1_name = 'adeno', m2_name = 'non-adeno', m1_label = 'all') -->
+<!-- #lollipopPlot2(samples.maf.plasmacytoid, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'plasmacytoid'"), gene = 'PTCH1', showDomainLabel = FALSE, pointSize = 1, verbose = FALSE, m1_name = 'plasmacytoid', m2_name = 'non-plasmacytoid', m1_label = 'all') -->
+<!-- ``` -->
+
+<!-- ```{r, results='hide', fig.keep='all', eval=FALSE} -->
+<!-- par(mfcol=c(2,3)) -->
+<!-- lollipopPlot2(samples.maf.adeno, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'adeno'"), gene = 'KRAS', alpha = 0.5, showDomainLabel = FALSE, pointSize = 1, verbose = FALSE) -->
+<!-- lollipopPlot2(samples.maf.plasmacytoid, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'plasmacytoid'"), gene = 'CDK12', alpha = 0.5, showDomainLabel = FALSE, pointSize = 1, verbose = FALSE) -->
+<!-- lollipopPlot2(samples.maf.adeno, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'adeno'"), gene = 'BRCA1', alpha = 0.5, showDomainLabel = FALSE, pointSize = 1, verbose = FALSE) -->
+<!-- lollipopPlot2(samples.maf.squamous, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'squamous'"), gene = 'KMT2A', alpha = 0.5, showDomainLabel = FALSE, pointSize = 1, verbose = FALSE) -->
+<!-- lollipopPlot2(samples.maf.plasmacytoid, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'plasmacytoid'"), gene = 'CHEK1', alpha = 0.5, showDomainLabel = FALSE, pointSize = 1, verbose = FALSE) -->
+<!-- lollipopPlot2(samples.maf.squamous, subsetMaf(samples.maf, clinQuery = "HISTOLOGY != 'squamous'"), gene = 'PIK3CA', alpha = 0.5, showDomainLabel = FALSE, pointSize = 1, verbose = FALSE) -->
+<!-- ``` -->
+
+<!-- ```{r, eval = FALSE} -->
+
+<!-- query_cancervar_api_check <- function(chrom, pos, ref, alt, build='hg19'){ -->
+<!--   url <- 'http://cancervar.wglab.org/api_new.php' -->
+<!--   res_get <- GET(url, query = list(queryType = 'position', build = build, chr = chrom, pos = pos, ref = ref, alt = alt)) -->
+<!--   res_content <- fromJSON(rawToChar(res_get$content), flatten = TRUE) -->
+<!-- } -->
+
+<!-- ``` -->
+
+<!-- ```{r, eval = FALSE} -->
+<!-- api_results <- data.frame() -->
+<!-- verify_muts <- function(maf.row){ -->
+<!--   oncokb_res <- query_oncokb_api_check(maf.row$Hugo_Symbol, maf.row$HGVSp_Short) -->
+<!--   if (is.na(oncokb_res)){ -->
+<!--     if (maf.row$Start_Position == maf.row$End_Position){ -->
+<!--       cancervar_res <- query_cancervar_api_check(maf.row$Chromosome, maf.row$Start_Position, maf.row$Reference_Allele, maf.row$Tumor_Seq_Allele2) -->
+<!--     } -->
+
+<!--   } -->
+<!-- } -->
+<!-- maf.row <- samples.maf@data[1,] -->
+<!-- ``` -->
+

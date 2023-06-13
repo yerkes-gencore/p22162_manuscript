@@ -1,0 +1,268 @@
+---
+title: "p22162_Lara_Analysis_v2"
+author: "DTG"
+date: '`r Sys.Date()`'
+output: 
+  rmdformats::robobook:
+    fig_width: 9
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo=FALSE, fig.width = 8, fig.height = 4, cache=FALSE, cache.lazy = FALSE, cache.rebuild = FALSE)
+library(tidyverse)
+library(ggforce)
+library(grid)
+library(ggpubr)
+library(yaml)
+library(DESeq2)
+library(EDASeq)
+library(DT)
+#library(shiny)
+library(EnhancedVolcano)
+library(tools)
+library(ComplexHeatmap)
+library(gridExtra)
+library(gtable)
+library(circlize)
+library(openxlsx)
+library(reshape2)
+library(kableExtra)
+library(rlang)
+library(forcats)
+library(gtools)
+library(RColorBrewer)
+library(fgsea)
+library(MatrixGenerics)
+library(here)
+#library(plyr)
+
+counts <- DESeq2::counts
+#config <- yaml.load_file("config.yaml")
+source("functions.R")
+```
+
+<style type="text/css">
+.book .book-body .page-inner {
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+## Study overview
+
+Analysis v4 added: added metadata for response
+
+```{r sample_metadata_setup}
+
+knitr::kable((analysis$sampleTable %>%
+                select(c(SampleID, Group, Batch, Responders))),
+             position='center', table.attr="style='width:100%;'", format='html') %>% 
+  kable_styling(full_width = TRUE)
+```
+
+
+
+## QC {.tabset}
+
+### PCA {.active}
+
+GEX PCA
+
+```{r pca, fig.width=12, fig.height=8}
+print(analysis$pca)
+```
+
+## Pairwise response group comparisons {.tabset}
+
+### Exceptional vs Normal
+
+```{r}
+### call results outputs here with output_results(name_of_comparison)
+### comparison names are based on the input lists earlier
+comparison1 <- output_results('Exceptional vs Normal')
+```
+
+```{r, fig.height=6}
+## kept separate to allow modified figure size
+comparison1$volcanoPlot
+```
+
+```{r}
+comparison1$DGEtable
+```
+
+```{r, fig.height=6}
+comparison1$gseaDotplot
+```
+
+```{r}
+comparison1$gseaTable
+```
+
+### Poor vs Normal
+
+```{r}
+## Same as before with the next comparison. Repeat for however many comparisons you have
+comparison2 <- output_results('Poor vs Normal')
+```
+
+```{r, fig.height=6}
+comparison2$volcanoPlot
+```
+
+```{r}
+comparison2$DGEtable
+```
+
+```{r, fig.height=6}
+comparison2$gseaDotplot
+```
+
+```{r}
+comparison2$gseaTable
+```
+
+### Exceptional vs Poor {.active}
+
+```{r}
+## Same as before with the next comparison. Repeat for however many comparisons you have
+comparison3 <- output_results('Exceptional vs Poor')
+```
+
+```{r, fig.height=6}
+comparison3$volcanoPlot
+```
+
+```{r}
+comparison3$DGEtable
+```
+
+```{r, fig.height=6}
+comparison3$gseaDotplot
+```
+
+```{r}
+comparison3$gseaTable
+```
+
+## Genes of interest {.tabset}
+
+These heatmaps show the relative expression (regularized and log2 transformed) of genes. Individual samples are grouped by their histology.
+
+### Top genes from pairwise comparisons {.active}
+
+Taking the most significantly differentially up and down expressed genes in the aforementioned pairwise comparisons. Expression is normalized to the median of all samples for that gene. 
+
+```{r, fig.width = 6, fig.height=12}
+## creating an arbitrary genelist
+filt_top_genes <- function(x) {
+  a <- rownames(as.data.frame(x) %>% arrange(pvalue) %>% filter(log2FoldChange<0, padj<0.05))
+  b <- rownames(as.data.frame(x) %>% arrange(pvalue) %>% filter(log2FoldChange>0, padj<0.05))
+  return(c(a,b))
+}
+genelist <- unique(unlist(lapply(results, filt_top_genes)))
+
+heatmap_from_genelist2(genelist)
+```
+
+### Genes from TCGA publications 
+
+A look at some marker genes identified in related bladder cancer literature [(1)](https://www.nature.com/articles/nature12965) [(2)](https://www.cell.com/cell/fulltext/S0092-8674(17)31056-5). 
+
+```{r, fig.width = 6, fig.height=10}
+genes <- c(
+'FGFR3',
+'miR-99a',
+'miR-100',
+'miR-125b',
+'miR-145',
+'ERBB2 ',#HER2
+'KRT5',
+'KRT6A',
+'KRT14',
+'EGFR',
+'GATA3',
+'FOXA1',
+'UPK3A',
+'ESR2',
+'miR-220a',
+'miR-220b',
+'KRT20',
+'PPARG',
+'SNX31',
+'UPK1A',
+'UPK2',
+'FGFR3',
+'PGM5',
+'DES',
+'C7',
+'p53',
+'CD44',
+'KRT',
+'TP53',
+'RB1',
+'E2F3',
+'CDH1',
+'HER2',
+'MDM2',
+'CDKN1A',
+# NONCODING RNAS lncRNAs
+'DANCR',
+'GAS5',
+'MALAT1',
+'NEAT1',
+'NORAD',
+'UCA1',
+'CD274',
+'PDCD1')
+heatmap_from_genelist2(genes)
+```
+
+### Genes from Hippo Pathway
+
+```{r, fig.width = 6, fig.height=10}
+for (pathway in c('Hippo')){ #'WNT', 'RTK-RAS', 
+  print(heatmap_from_genelist2(tcga_pathways[[pathway]], title = pathway))
+}
+```
+
+### Manuscript genes
+
+```{r, fig.width = 6, fig.height=7}
+genelist <- c('NECTIN4','CD274', 'FGFR3', 'UPK2', 'SNX31', 'PPARG', 'EGFR', 'RB1', 'ERBB2')
+heatmap_from_genelist2(genelist)
+```
+
+## GSEA {.tabset}
+
+### Pathways from publications
+
+GSEA is conducted such that if the enrichment score is positive, the pathway is enriched in the first listed group, and if the enrichment score is negative, the pathway is enriched in the second group
+
+```{r,  fig.height=8, fig.width=8}
+
+pathway_list <- names(gmt.file) %>% head(10)
+
+gsea_plot_data <- lapply(names(results), function(x) {
+  a <- results[[x]]@gsea
+  a[a$pathway %in% pathway_list, ]
+} )
+names(gsea_plot_data) <- names(results)
+gsea_plot_data <- data.table::rbindlist(gsea_plot_data, idcol='ID')
+#tmp3 <- unlist(lapply(names(results), function(x) paste0(strsplit(results[[x]]@metadata$contrast, "_")[[1]][2:3], collapse=" over ")))
+#tmp2$`.id` <- plyr::mapvalues(tmp2$`.id`, from= 1:10, to = names(results))
+gsea_plot_data$pathway <- wrap_underscore_strings_balance(gsea_plot_data$pathway,36)
+#gsea_plot_data <- gsea_plot_data %>% separate(ID, c("ID"), extra = 'drop', sep=' ') #%>% mutate(ID = substr(ID, 6, 100))
+
+  ggplot(gsea_plot_data) + geom_point(aes(x=ID, y=pathway, size=-log(pval), color=NES)) +
+    scale_color_gradient2(low="blue", mid="white",high="red", midpoint=0, breaks=c(-2,-1,0,1,2), limits=c(min(gsea_plot_data$NES,-1), max(gsea_plot_data$NES,1))) +
+    theme_classic(11) +
+    theme(panel.grid.major = element_line(colour = "grey92"),
+          panel.grid.minor = element_line(colour = "grey92"),
+          panel.grid.major.y = element_line(colour = "grey92"),#element_blank(),
+          panel.grid.minor.y = element_line(colour = "grey92")) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    labs(x="Comparison", y="Gene set", color = "Normalized\nenrichment\nscore", size="Nom p-val", title="Pathways of interest") +  scale_radius(name="NOM p-val", range=c(1,10), breaks=-log10(c(0.1,0.01,0.001,0.0001)), labels=c(0.1,0.01,0.001,0.0001)) 
+
+```

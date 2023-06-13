@@ -1,0 +1,655 @@
+---
+title: "p22162_Lara_Analysis_v2"
+author: "DTG"
+date: '`r Sys.Date()`'
+output: 
+  rmdformats::robobook:
+    fig_width: 9
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo=FALSE, fig.width = 8, fig.height = 4, cache=FALSE, cache.lazy = FALSE, cache.rebuild = FALSE)
+library(tidyverse)
+library(ggforce)
+library(grid)
+library(ggpubr)
+library(yaml)
+library(DESeq2)
+library(EDASeq)
+library(DT)
+#library(shiny)
+library(EnhancedVolcano)
+library(tools)
+library(ComplexHeatmap)
+library(gridExtra)
+library(gtable)
+library(circlize)
+library(openxlsx)
+library(reshape2)
+library(kableExtra)
+library(rlang)
+library(forcats)
+library(gtools)
+library(RColorBrewer)
+library(fgsea)
+library(MatrixGenerics)
+library(here)
+#library(plyr)
+
+counts <- DESeq2::counts
+#config <- yaml.load_file("config.yaml")
+source("functions.R")
+```
+
+<style type="text/css">
+.book .book-body .page-inner {
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+## Study overview
+
+```{r reset_analysis_obj, eval=TRUE, include=FALSE}
+# This is moved out of the setup block to avoid accidentally overwriting your
+# analysis object when restarting a session
+analysis = list()
+```
+
+```{r load_config, include=FALSE}
+# Store config with results object for record keeping
+analysis$config <- yaml.load_file(here("config/config_v4.yml"))
+```
+
+```{r sample_metadata_setup}
+
+analysis$sampleTable <- read.table(here("config/p22162_Lara_exp_design_v4.txt"), header=T, stringsAsFactors = FALSE, sep="\t", quote='"')
+analysis$sampleTable$CollectionDate <- as.Date(analysis$sampleTable$CollectionDate,
+                                               tryFormats=c("%m/%d/%y"))
+analysis$sampleTable$CollectionSite <- plyr::mapvalues(analysis$sampleTable$CollectionSite,
+                                                       from=c(1,2), to=c('Bladder', 'Other'))
+analysis$sampleTable$TumorRegions <- as.integer(analysis$sampleTable$TumorRegions)
+analysis$sampleTable$Age <- as.integer(analysis$sampleTable$Age)
+analysis$sampleTable$Batch <- as.factor(analysis$sampleTable$Batch)
+analysis$sampleTable$Responders <- factor(analysis$sampleTable$Responders, levels = c('Normal', 'Poor', 'Exceptional'))
+knitr::kable((analysis$sampleTable %>%
+                select(c(SampleID, Group, Batch, Responders))),
+             position='center', table.attr="style='width:100%;'", format='html') %>% 
+  kable_styling(full_width = TRUE)
+analysis$sampleTable <- analysis$sampleTable %>% 
+  dplyr::arrange(across(all_of(analysis$config$sampleGrouping)))
+#analysis$sampleTable <- as.data.frame(sapply(analysis$sampleTable, as.factor))
+
+
+# Store the order you'd like samples to appear in figure
+# Order is determined by sampleGrouping parameters in config
+# But you could also manually specify it here if there aren't easy rules
+sample_order <- fct_inorder(as.character(analysis$sampleTable$SampleID))
+```
+
+```{r}
+if (!is.null(unlist(analysis$config$dropSamples))){
+  out <- paste0("Sample(s)\n", paste0(analysis$config$dropSamples, sep=", ", collapse = ''),"\nbeing removed from downstream analysis per user specification.") 
+  analysis$sampleTable <- analysis$sampleTable %>% filter(!SampleID %in% analysis$config$dropSamples)
+  sample_order <- sample_order[!(sample_order %in% as.factor(analysis$config$dropSamples))]
+  cat(out)
+} else {
+  analysis$ddsDrop <- analysis$dds
+}
+sample_order <- droplevels(sample_order)
+```
+
+```{r read_counts_tables, include=FALSE}
+#analysis$samplefileIDs <- dir(file.path(analysis$config$rootDir, analysis$config$alignmentDir), pattern=paste0("*",analysis$config$STARreadSuffix)
+analysis$samplefileIDs <- analysis$sampleTable$FileID
+#analysis$samplefileIDs <- analysis$samplefileIDs[analysis$samplefileIDs %in% analysis$sampleTable$FileID]
+analysis$sampleSTARReads <- sapply(analysis$sampleTable$FileID, function(sid) {
+  read_tsv(file.path(analysis$config$rootDir,
+                     analysis$config$alignmentDir,paste0(sid,analysis$config$STARreadSuffix)),
+  col_names = c("gene_id","unstranded_count","sense_count","antisense_count"),
+  col_types = c(gene_id = col_character(),
+  unstranded_count = col_double(),
+  sense_count = col_double(),
+  antisense_count = col_double()))},
+simplify = FALSE,
+USE.NAMES = TRUE)
+```
+
+```{r dds, include=FALSE}
+analysis$mapBins <- do.call(cbind,
+                            sapply(analysis$sampleTable$FileID, function(sid){
+                              analysis$sampleSTARReads[[sid]][,paste0(analysis$config$libraryType,"_count")][c(1:4),]}))
+rownames(analysis$mapBins) <- analysis$sampleSTARReads[[1]][c(1:4),][["gene_id"]]
+colnames(analysis$mapBins) <- recode(as.character(unlist(strsplit(analysis$sampleTable$SampleID, paste0(".", analysis$config$libraryType, "_count")))), !!!setNames(analysis$sampleTable$SampleID, as.character(analysis$sampleTable$FileID)))
+ 
+raw_counts <- do.call(cbind,sapply(analysis$sampleTable$FileID, function(sid){analysis$sampleSTARReads[[sid]][,paste0( analysis$config$libraryType, "_count")][-c(1:4),]}))
+colnames(raw_counts) <- recode(as.character(unlist(strsplit(analysis$sampleTable$FileID, paste0(".", analysis$config$libraryType, "_count")))), !!!setNames(analysis$sampleTable$SampleID, as.character(analysis$sampleTable$FileID)))
+rownames(analysis$sampleTable) <- analysis$sampleTable$SampleID
+analysis$sampleTable <- analysis$sampleTable[colnames(raw_counts),]
+analysis$dds <- DESeqDataSetFromMatrix(raw_counts,
+  analysis$sampleTable,
+  design = as.formula(paste0("~ ", analysis$config$design))
+)
+analysis$mapBins <- rbind(analysis$mapBins,"N_identified" = colSums2(DESeq2::counts(analysis$dds)))
+```
+
+## QC {.tabset}
+
+### Mapping
+
+Mapping outcomes of reads from each sample. Reads need to be 'identified' or successfully mapped to a single feature to be used for gene expression analysis.
+
+```{r mapping_plot, fig.width=12}
+mapping_plot(analysis$mapBins, sort=TRUE)# + aes(sort(SampleID))
+```
+
+```{r gene_names, include=FALSE}
+geneInfoTab <- read_tsv(file.path(analysis$config$rootDir, analysis$config$referenceDir, "geneInfo.tab"), skip = 1, col_names = c("gene_id","gene_symbol","gene_type"))
+
+## Remove samples if there are fewer total fragment counts than there are possible features
+## Somewhat arbitrary lower bound and shouldn't be an issue, but could catch a technical error
+## if data isn't loading correctly (but you should see this in the mapping plot)
+lowcounts <- colSums(assay(analysis$dds)) < nrow(geneInfoTab)
+if (sum(lowcounts)>0){
+  cat("Removing sample(s): ", names(lowcounts)[lowcounts], "due to low counts", sep="\n")
+}
+analysis$ddsDrop <- analysis$dds[,!lowcounts]
+sample_order <- sample_order[!lowcounts]
+sample_order <- droplevels(sample_order)
+analysis$samplefileIDs <- analysis$samplefileIDs[!lowcounts]
+
+rownames(analysis$ddsDrop) <- make.names(geneInfoTab$gene_symbol, unique=TRUE)
+rownames(raw_counts) <- make.names(geneInfoTab$gene_symbol, unique=TRUE)
+```
+
+```{r vst_and_ddsDrop, include=FALSE}
+analysis$vst <- varianceStabilizingTransformation(analysis$ddsDrop,
+                                                         blind = FALSE,
+                                                         fitType = "parametric")
+analysis$ddsDrop <- DESeq(analysis$ddsDrop, parallel = TRUE)
+analysis$rldDrop <- rlog(analysis$ddsDrop, blind = FALSE, fitType = "parametric")
+```
+
+### Relative Log Expression (RLE) normalization
+
+```{r rle, fig.width=12, eval=FALSE}
+rawLogCounts <- log(counts(analysis$ddsDrop)[rowMins(counts(analysis$ddsDrop))>0,])
+rawMedianLogs <- rowMedians(rawLogCounts)
+rawLogRatios <- rawLogCounts - rawMedianLogs
+
+
+normLogCounts <- log(DESeq2::counts(analysis$ddsDrop, normalized = TRUE)[rowMins(DESeq2::counts(analysis$ddsDrop))>0,])
+normMedianLogs <- rowMedians(normLogCounts)
+normLogRatios <- normLogCounts - normMedianLogs
+
+analysis$RLE_raw <- RLE_plot(rawLogRatios, 'RLE Raw')
+analysis$RLE_norm <- RLE_plot(normLogRatios, 'RLE Normalized')
+
+print(analysis$RLE_raw)
+print(analysis$RLE_norm)
+```
+
+
+### PCA {.active}
+
+GEX PCA
+
+```{r pca, fig.width=12, fig.height=8}
+analysis$pca <- PCA_plot_from_config(analysis)
+print(analysis$pca)
+```
+
+## Pairwise histology group comparisons {.tabset}
+
+```{r}
+maxMinFilter <- function(object, intgroup = "condition", comp = c("ctrl","trmt"), thresh = 0)
+{
+  if (!all(intgroup %in% names(colData(object)))) {
+    stop("the argument 'intgroup' should specify columns of colData(dds)")
+  }
+  intgroup.df <- as.data.frame(colData(object)[, intgroup, drop = FALSE])
+  
+  group <- if (length(intgroup) > 1) {
+    interaction(lapply(intgroup, function(factorname) colData(ddsMoTime20034)[[factorname]]), drop = TRUE)
+    #    factor(apply(intgroup.df, 1, paste, collapse = " : "))
+  }
+  else {
+    colData(object)[[intgroup]]
+  }
+  if (!all(comp %in% levels(group))) {
+    stop("the argument 'comp' should specify levels of intgroup")
+  }
+  #  if_else(rowMaxs(sapply(c("d0","d30"), function(lvl) rowMins(counts(ddsMoTime20034, normalize = TRUE)[,ddsMoTime20034$Timepoint == lvl]))) > 0,rowMeans2(counts(ddsMoTime20034, normalized = TRUE)),0)
+  if_else(rowMaxs(sapply(comp, function(lvl) rowMins(counts(object, normalize = TRUE)[,group == lvl]))) > thresh,rowMeans2(counts(object, normalized = TRUE)),0)
+}
+```
+
+```{r GSEA_setup}
+## read in rlog file
+#rlog_for_GSEA <- read.csv(paste0("rlog_forGSEA_", analysis$config$analysis, ".txt"), sep='\t')
+## read GMT files
+gmt.file <- list()
+tcga_pathways <- readRDS(here('reference data/TCGA_pathway_genes.Rds'))
+cancer_pathways <- readRDS(here('reference data/pathways_cancer_genes.Rds'))
+gmt.file <- c(tcga_pathways, cancer_pathways)
+  # for (a in file.path(analysis$config$rootDir, analysis$config$gseaFilesPath, analysis$config$gseaCollections)){#'mh.all.v0.3.symbols.gmt'
+  #   gmt.file <- append(gmt.file, gmtPathways(file.path(a)))
+  # }
+```
+
+```{r run_comparisons}
+
+#### Add comparisons to get results for here as list of two lists: 
+#### first list has the result names for coefficients to compare
+#### second is a list that maps to the first list and says whether to run it as
+#### results(analysis, name=<comparison>) or results(analysis, contrast=c(list(<comparisons)))
+#### these can be very different and are important for multifactor designs
+#### See example below. First list is the names/contrasts. If it is a contrast,
+#### the two factors should be put as a list. A name can just be a character vector
+####  my_comparisons <- list(                           # the whole thing is a list of lists
+####            list('CD8Depleted.TimepointW1',         # the list of comparisons
+####                  list('Timepoint_W7_vs_W0',        # the second member is a contrast, so a list of two names
+####                       'CD8Depleted.TimepointW7'),
+####                       'Timepoint_W1_vs_W0'),       # end of comparisons
+####                  list('name', 'contrast', 'name')) # second list, saying if each member of the first 
+####                                                    # list is a name or a contrast for the results call
+#### see resultsNames(analysis$ddsDrop) for help choosing comparisons
+
+# resultsNames(analysis$ddsDrop)
+
+my_comparisons <- list(
+  c('Responders', 'Exceptional', 'Normal'),
+  c('Responders', 'Poor', 'Normal'),
+  c('Responders', 'Exceptional', 'Poor')
+)
+
+comp_groups <- list(
+  c('Exceptional', 'Normal'),
+  c('Poor', 'Normal'),
+  c('Exceptional', 'Poor')
+)
+
+pairwise_comparisons <- function(contrasts, comp_groups, alpha=0.05){
+  ## Generate DESeq2 results objects for contrasts of interest
+  result <- results(analysis$ddsDrop,
+                    contrast = contrasts,
+                    alpha = alpha,
+                    filter=maxMinFilter(analysis$ddsDrop, 
+                                        intgroup = 'Responders',
+                                        comp = comp_groups))
+  result@metadata$contrast <- paste(contrasts[2], contrasts[3], sep=' vs ')
+  
+  return(result)
+}
+
+## Get DESeq2 results for each comparison of interest
+results <- mapply(pairwise_comparisons,my_comparisons, comp_groups)
+wb <- createWorkbook()
+## Convert these result objects to custom class with visualizations, etc
+## option to write out each result as an individual sheet in the workbook
+results <- lapply(results, my_results_transform, wb, write_out=FALSE)
+
+## Name result objects from contrasts
+names(results) <- lapply(results, function(x) x@metadata$contrast)
+
+
+## Write all results to workbook 
+#write_output_workbook(wb, results, analysis)
+#saveWorkbook(wb, file=paste0(analysis$config$analysis, "_DESeq2_results_v4.xlsx"), overwrite=T)
+```
+
+```{r prepare_results}
+### you can add custom ggplot tracks to the outputs here, or edit datatables
+### Input is the modifided DESeq2 object with the visualizations
+output_results <- function(comp){
+  # Just plaintext summary of the result object
+  summary(results[[comp]])
+  # Fixed window volcano plot
+  volcanoPlot <- results[[comp]]@visualizations$volplot_fixed 
+  # Interactive datatable of all DGE results for this comp
+  DGEtable <- DT::datatable(
+    data.frame(results[[comp]]) %>%
+      select(baseMean, log2FoldChange, lfcSE, padj) %>%
+      filter(padj < analysis$config$alpha) %>%
+      mutate_if(is.numeric, round, 5) %>% 
+      na.omit() %>%
+      rownames_to_column(),
+    rownames = FALSE,
+    caption='DESeq2 output for this comparison, significant genes only',
+    filter='top',
+    autoHideNavigation = TRUE)  %>%
+    formatRound(c('baseMean','log2FoldChange', 'lfcSE'), digits=2)
+  # Dotplot of top GSEA pathways
+  gseaDotplot <- gsea_dotplot(head(results[[comp]]@gsea, 10),
+                              findtoppaths = FALSE,
+                              title='10 TCGA pathways')
+  # Interactive table of GSEA results
+  gseaTable <- DT::datatable(results[[comp]]@gsea[order(results[[comp]]@gsea$pval)] %>% 
+                             select(pathway,pval,padj,ES,NES,size,) %>%
+                               filter(padj < 0.1),
+                             rownames = FALSE,
+                             filter='top',
+                             autoHideNavigation = TRUE, 
+                             caption='Significant GSEA enrichment results') %>%
+    formatRound(c('pval','padj', 'ES','NES'),
+                digits=4)
+  
+  return(list(volcanoPlot=volcanoPlot,
+              DGEtable=DGEtable,
+              gseaDotplot=gseaDotplot,
+              gseaTable=gseaTable))
+}
+```
+
+### Exceptional vs Normal
+
+```{r}
+### call results outputs here with output_results(name_of_comparison)
+### comparison names are based on the input lists earlier
+comparison1 <- output_results('Exceptional vs Normal')
+```
+
+```{r, fig.height=6}
+## kept separate to allow modified figure size
+comparison1$volcanoPlot
+```
+
+```{r}
+comparison1$DGEtable
+```
+
+```{r, fig.height=6}
+comparison1$gseaDotplot
+```
+
+```{r}
+comparison1$gseaTable
+```
+
+### Poor vs Normal
+
+```{r}
+## Same as before with the next comparison. Repeat for however many comparisons you have
+comparison2 <- output_results('Poor vs Normal')
+```
+
+```{r, fig.height=6}
+comparison2$volcanoPlot
+```
+
+```{r}
+comparison2$DGEtable
+```
+
+```{r, fig.height=6}
+comparison2$gseaDotplot
+```
+
+```{r}
+comparison2$gseaTable
+```
+
+### Exceptional vs Poor
+
+```{r}
+## Same as before with the next comparison. Repeat for however many comparisons you have
+comparison3 <- output_results('Exceptional vs Poor')
+```
+
+```{r, fig.height=6}
+comparison3$volcanoPlot
+```
+
+```{r}
+comparison3$DGEtable
+```
+
+```{r, fig.height=6}
+comparison3$gseaDotplot
+```
+
+```{r}
+comparison3$gseaTable
+```
+
+## Genes of interest {.tabset}
+
+These heatmaps show the relative expression (regularized and log2 transformed) of genes. Individual samples are grouped by their histology.
+
+### Top genes from pairwise comparisons {.active}
+
+Taking the most significantly differentially up and down expressed genes in the aforementioned pairwise comparisons. Expression is normalized to the median of all samples for that gene. 
+
+```{r}
+hmap_normalizer <- function(group){
+  data <- analysis$rldDrop[,colData(analysis$rldDrop)$Group == group]
+  control <- data[,colData(data)$Responders == 'Normal']
+  baseline <- rowMedians(assay(control))
+  condition <- data[,colData(data)$Responders != 'Normal']
+  hmap_data <- assay(condition) - baseline
+  return(hmap_data)
+}
+
+hmap_data <- lapply(unique(analysis$sampleTable$Group), hmap_normalizer)
+hmap_data <- do.call(cbind, hmap_data)
+
+hmap_coldata <- colData(analysis$rldDrop)[colnames(hmap_data),]
+
+hmap_data <- SummarizedExperiment(assays = hmap_data,
+                                   colData = hmap_coldata)
+hmap_data <- hmap_data[,hmap_data$SampleID != 'Emory-006']
+```
+
+
+```{r, fig.width = 6, fig.height=6}
+## creating an arbitrary genelist
+filt_top_genes <- function(x) {
+  a <- rownames(as.data.frame(x) %>% arrange(pvalue) %>% filter(log2FoldChange<0) %>% filter(padj < 0.05))
+  b <- rownames(as.data.frame(x) %>% arrange(pvalue) %>% filter(log2FoldChange>0) %>% filter(padj < 0.05))
+  return(c(a,b))
+}
+genelist <- unique(unlist(lapply(results, filt_top_genes)))
+
+# top_genes <- data.frame(results(analysis$ddsDrop)) %>% filter(!is.na(pvalue)) %>% filter(abs(log2FoldChange)>log2(1.5))
+# top_genes <- top_genes[order(top_genes$pvalue),]
+# geneList <- (rownames(head(top_genes, 40))) 
+
+
+heatmap_from_genelist2 <- function(geneList, data=hmap_data, title= ' '){
+  ### makes a heatmap of the given list of genes, separating samples slightly by group variable
+  ## data should be of type DESeqTransform
+  hmap <- data[rownames(data) %in% geneList,]
+  hmap <- hmap[order(match(rownames(hmap), geneList)),]
+  slices <- as.numeric(hmap@colData$Responders)
+  labels <- levels(hmap@colData$Responders)[sort(unique(slices))]
+  Heatmap(assay(hmap), show_row_names = TRUE, heatmap_legend_param = list(title="log2 fold\nexpression"),border="black",column_order=colnames(hmap),
+          width = ncol(hmap)*unit(3, "mm"),
+          height = nrow(hmap)*unit(3, "mm"),
+          rect_gp = gpar(color="black"),
+          column_title=title,
+          cluster_rows=FALSE,
+          column_names_gp = grid::gpar(fontsize = 8),
+          row_names_gp = grid::gpar(fontsize = 8),
+          column_split=slices,
+          top_annotation = HeatmapAnnotation(foo = anno_block(gp = gpar(col=NA),
+                                                              #,fill = 2:length(unique(exp.design$Group))+1),
+                                                              labels = labels, 
+                                                              labels_gp = gpar(col = "black", fontsize = 10), labels_rot=90, height=unit(8,"cm"))), #
+          column_gap=unit(2, "mm"),
+          col=colorRamp2(c(-2, 0, 2), c("blue", "white", "red")))
+}
+
+## Pass in a genelist
+par(mai=c(1,1,6,1))
+heatmap_1 <- heatmap_from_genelist2(genelist)
+heatmap_1
+```
+
+### Genes from TCGA publications 
+
+A look at some marker genes identified in related bladder cancer literature [(1)](https://www.nature.com/articles/nature12965) [(2)](https://www.cell.com/cell/fulltext/S0092-8674(17)31056-5). 
+
+```{r, fig.width = 16, fig.height=16}
+genes <- c(
+'FGFR3',
+'miR-99a',
+'miR-100',
+'miR-125b',
+'miR-145',
+'ERBB2 ',#HER2
+'KRT5',
+'KRT6A',
+'KRT14',
+'EGFR',
+'GATA3',
+'FOXA1',
+'UPK3A',
+'ESR2',
+'miR-220a',
+'miR-220b',
+'KRT20',
+'PPARG',
+'SNX31',
+'UPK1A',
+'UPK2',
+'FGFR3',
+'PGM5',
+'DES',
+'C7',
+'p53',
+'CD44',
+'KRT',
+'TP53',
+'RB1',
+'E2F3',
+'CDH1',
+'HER2',
+'MDM2',
+'CDKN1A',
+# NONCODING RNAS lncRNAs
+'DANCR',
+'GAS5',
+'MALAT1',
+'NEAT1',
+'NORAD',
+'UCA1',
+'CD274',
+'PDCD1')
+heatmap_from_genelist2(genes)
+```
+
+### Genes from Hippo Pathway
+
+```{r, fig.width = 16, fig.height=16}
+for (pathway in c('Hippo')){ #'WNT', 'RTK-RAS', 
+  print(heatmap_from_genelist2(tcga_pathways[[pathway]], title = pathway))
+}
+```
+
+### Manuscript genes
+
+```{r, fig.width = 16, fig.height=8}
+genelist <- c('NECTIN4','CD274', 'FGFR3', 'UPK2', 'SNX31', 'PPARG', 'EGFR', 'RB1', 'ERBB2')
+heatmap_from_genelist2(genelist)
+```
+
+<!-- ### HPV genes -->
+
+<!-- ```{r, fig.width = 16, fig.height=10} -->
+<!-- genelist <- c('SLF1', 'ARHGAP4', 'RMI2', ' CRACDL', 'CENPK', 'CIDEB', 'DDB2', 'FAM111B', 'GRIN2C', 'LIG1', 'MGA', 'NEURL1B', 'NUSAP1', 'PHF19', 'POLD1', 'SP1', 'UBR7', 'WDR76') -->
+<!-- heatmap_from_genelist2(genelist) -->
+<!-- ``` -->
+
+<!-- # ```{r, fig.width = 16, fig.height=10} -->
+<!-- #  -->
+<!-- # genelist <- c('UBE2NL','APOBEC3H','RAD9B','GPR143', 'CMC4','SCML1', 'SH3GLB2','PGK1','THBD','NAMPT',  'CD46', 'NCSTN','MTMR2', 'P4HA2', 'NRP1', 'CXCL2','PTPN12','CAVIN3','EGLN1','TMEM87B', 'ERG', 'ESM1','STARD3NL', 'PEAR1', 'ARMT1', 'TYW1',  'ZNF134','TPGS1',  'SPRYD7', 'DLEU1',  'PLAC1',  'FAM124B',     'ROR1',     'ZNF418') -->
+<!-- # heatmap_from_genelist2(genelist) -->
+<!-- # ``` -->
+
+## GSEA {.tabset}
+
+### Pathways from publications
+
+GSEA is conducted such that if the enrichment score is positive, the pathway is enriched in the first listed group, and if the enrichment score is negative, the pathway is enriched in the second group
+
+```{r,  fig.height=8, fig.width=8}
+
+# pathway_list <- c(
+#   "WP_OXIDATIVE_STRESS_RESPONSE",
+#   "GOBP_CELLULAR_RESPONSE_TO_DNA_DAMAGE_STIMULUS",
+#   "GOBP_HISTONE_MODIFICATION",
+#   "REACTOME_TRANSCRIPTIONAL_REGULATION_BY_TP53",
+#   "GOBP_ALTERNATIVE_MRNA_SPLICING_VIA_SPLICEOSOME",
+#   'BIOCARTA_HSWI_SNF_PATHWAY',
+#   'REACTOME_COHESIN_LOADING_ONTO_CHROMATIN',
+#   'GOBP_REGULATION_OF_CELL_CYCLE',
+#   'GOBP_CHROMATIN_REMODELING'
+# )
+pathway_list <- names(gmt.file) %>% head(10)
+
+gsea_plot_data <- lapply(names(results), function(x) {
+  a <- results[[x]]@gsea
+  a[a$pathway %in% pathway_list, ]
+} )
+names(gsea_plot_data) <- names(results)
+gsea_plot_data <- data.table::rbindlist(gsea_plot_data, idcol='ID')
+#tmp3 <- unlist(lapply(names(results), function(x) paste0(strsplit(results[[x]]@metadata$contrast, "_")[[1]][2:3], collapse=" over ")))
+#tmp2$`.id` <- plyr::mapvalues(tmp2$`.id`, from= 1:10, to = names(results))
+gsea_plot_data$pathway <- wrap_underscore_strings_balance(gsea_plot_data$pathway,36)
+#gsea_plot_data <- gsea_plot_data %>% separate(ID, c("ID"), extra = 'drop', sep=' ') #%>% mutate(ID = substr(ID, 6, 100))
+
+  ggplot(gsea_plot_data) + geom_point(aes(x=ID, y=pathway, size=-log(pval), color=NES)) +
+    scale_color_gradient2(low="blue", mid="white",high="red", midpoint=0, breaks=c(-2,-1,0,1,2), limits=c(min(gsea_plot_data$NES,-1), max(gsea_plot_data$NES,1))) +
+    theme_classic(11) +
+    theme(panel.grid.major = element_line(colour = "grey92"),
+          panel.grid.minor = element_line(colour = "grey92"),
+          panel.grid.major.y = element_line(colour = "grey92"),#element_blank(),
+          panel.grid.minor.y = element_line(colour = "grey92")) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    labs(x="Comparison", y="Gene set", color = "Normalized\nenrichment\nscore", size="Nom p-val", title="Pathways of interest") +  scale_radius(name="NOM p-val", range=c(1,10), breaks=-log10(c(0.1,0.01,0.001,0.0001)), labels=c(0.1,0.01,0.001,0.0001)) 
+
+```
+
+<!-- ### Top pathways from this study -->
+
+<!-- Taking the top 3 most significant pathways from each pairwise comparison in this study -->
+
+<!-- ```{r,  fig.height=10, fig.width=10} -->
+
+<!-- gsea_plot_data <- lapply(names(results), function(x) { -->
+<!--   a <- results[[x]]@gsea -->
+<!--   head(a %>% arrange(pval), 3)$pathway -->
+<!-- } ) -->
+
+<!-- gsea_plot_data <- lapply(names(results), function(x) { -->
+<!--   a <- results[[x]]@gsea -->
+<!--   a %>% filter(pathway %in% unlist(gsea_plot_data)) -->
+<!-- } ) -->
+<!-- names(gsea_plot_data) <- names(results) -->
+<!-- gsea_plot_data <- data.table::rbindlist(gsea_plot_data, idcol='ID') -->
+<!-- #tmp3 <- unlist(lapply(names(results), function(x) paste0(strsplit(results[[x]]@metadata$contrast, "_")[[1]][2:3], collapse=" over "))) -->
+<!-- #tmp2$`.id` <- plyr::mapvalues(tmp2$`.id`, from= 1:10, to = names(results)) -->
+<!-- gsea_plot_data$pathway <- wrap_underscore_strings_balance(gsea_plot_data$pathway,36) -->
+<!-- gsea_plot_data <- gsea_plot_data %>% separate(ID, c("ID"), extra = 'drop', sep=' ') %>% mutate(ID = substr(ID, 6, 100)) -->
+
+
+
+<!--   ggplot(gsea_plot_data) + geom_point(aes(x=ID, y=pathway, size=-log(pval), color=NES)) + -->
+<!--     scale_color_gradient2(low="blue", mid="white",high="red", midpoint=0, breaks=c(-2,-1,0,1,2), limits=c(min(gsea_plot_data$NES,-1), max(gsea_plot_data$NES,1))) + -->
+<!--     theme_classic(11) + -->
+<!--     theme(panel.grid.major = element_line(colour = "grey92"), -->
+<!--           panel.grid.minor = element_line(colour = "grey92"), -->
+<!--           panel.grid.major.y = element_line(colour = "grey92"),#element_blank(), -->
+<!--           panel.grid.minor.y = element_line(colour = "grey92")) + -->
+<!--     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + -->
+<!--     labs(x="Comparison", y="Gene set", color = "Normalized\nenrichment\nscore", size="Nom p-val", title="Top Pathways") +  scale_radius(name="NOM p-val", range=c(1,8), breaks=-log10(c(0.1,0.01,0.001,0.0001)), labels=c(0.1,0.01,0.001,0.0001)) -->
+
+<!-- ``` -->
+
+```{r}
+rmarkdown::render(here('scripts/p22162_Lara_Analysis_v4.format.Rmd'),
+                  output_dir = here::here('reports'),
+                  output_file = 'p22162_Lara_Analysis_v4.html')
+```
+
