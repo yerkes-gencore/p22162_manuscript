@@ -1,0 +1,482 @@
+---
+title: "p22162_Lara_exome_analysis"
+author: "Emory Gencore"
+date: "`r Sys.Date()`"
+output: 
+  rmdformats::readthedown:
+    fig_width: 9
+    toc_depth: 4
+---
+
+<style type="text/css">
+ #content {
+   max-width: 1200px;
+ }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, fig.align = 'center', fig.height = 4, fig.width = 4)
+#BiocManager::install("chimeraviz")
+library(chimeraviz)
+library(rtracklayer)
+library(dplyr)
+library(dbplyr)
+library(DT)
+library(jsonlite)
+library(httr)
+```
+
+```{r}
+fusion_data <- data.frame()
+
+for (sample in dir('/Volumes/yerkes/genomelab/illumina/runs/Analysis/2022_Analyses/p22162_Lara/fusions/p22162_Lara_fusions_processing/arriba/', 'p22162-s*', include.dirs = TRUE, full.names = FALSE)){
+  file <- file.path('/Volumes/yerkes/genomelab/illumina/runs/Analysis/2022_Analyses/p22162_Lara/fusions/p22162_Lara_fusions_processing/arriba',sample, 'fusions.tsv')
+  if (file.exists(file)){
+    df <- read.csv(file, header=TRUE, sep='\t')
+    if (nrow(df) > 0){
+      df$sample <- sample
+      fusion_data <- rbind(fusion_data, df)
+    }
+  }
+}
+
+sample_metadata <- read.csv('p22162_histologies.csv', header = TRUE) %>%
+  mutate(sample = paste0(Sample.ID, '_', Subject.Number))
+```
+
+
+```{r}
+## Chimera vis stuff 
+##fusion_data <- import_starfusion('star-fusion.fusion_predictions.abridged.tsv', genome_version = 'hg38')
+##plot_circle(fusion_data)
+
+## fusion_data[[1]] <- add_fusion_reads_alignment(fusion_data[[1]], '../p22162_Lara_fusions_processing/star-fusion/Aligned.out.bam')
+## plot_fusion_reads(fusion_data[[1]])
+## gtf <- readGFF("../p22162_Lara_fusions_processing/arriba/RefSeq_hg38.gtf")
+## edbSqliteFile <- ensDbFromGtf(gtf = "../p22162_Lara_fusions_processing/arriba/RefSeq_hg38.gtf",organism = 'homo_sapiens', genomeVersion = 'hg38', version = 'RefSeq_v.unknown')
+## edb <- ensembldb::EnsDb(edbSqliteFile)
+## edb <- ensembldb::EnsDb("Homo_sapiens.GRCh37.74.sqlite")
+```
+
+
+
+# Querying chimerdb
+
+Querying fusions against ChimerDB (seq, KB, and pub)
+
+[Read here how to interpret supporting read information.](https://arriba.readthedocs.io/en/latest/interpretation-of-results/#supporting-read-count) Generally, real fusions can have low numbers of supporting reads, but the amount of expected support should generally scale with the expression of a gene. Multiple types of evidence (split reads and discordant mates) should be seen, otherwise it may be technical artifact. Supporting reads of true predictions is usually at least 1% of total coverage. 
+
+```{r load_chimerdbs}
+chimerseq_db <- read.csv('reference_datasets/ChimerSeq4.csv', header = TRUE,row.names = 1)
+chimerkb_db <- read.csv('reference_datasets/ChimerKB4.csv', header = TRUE,row.names = 1)
+## Some bugs with the scraping, some fusions such as 'RT-PCR' have no score
+chimerpub_db <- read.csv('reference_datasets/ChimerPub4.csv', header = TRUE,row.names = 1) %>% filter(!is.na(Score))
+```
+
+```{r query_chimerDB_functions}
+query_chimerseq <- function(gene1, gene2, filter_reliable = TRUE, return_data = FALSE){
+  res <- chimerseq_db %>% 
+    filter((H_gene == gene1 & T_gene == gene2) | (H_gene == gene2 & T_gene == gene1))
+  if (filter_reliable){
+    res <- res %>% filter(Highly_Reliable_Seq == 'Seq+')
+  }
+  if (return_data){
+    return(res)
+  } else {
+    if (nrow(res)>0){
+      return(TRUE)
+    } else {
+      return(FALSE)
+    }
+  }
+}
+
+query_chimerpub <- function(gene1, gene2, filter_reliable = TRUE, return_data = FALSE){
+  res <- chimerpub_db %>% 
+    filter((H_gene == gene1 & T_gene == gene2) | (H_gene == gene2 & T_gene == gene1))
+  if (filter_reliable){
+    res <- res %>% filter(Score > 0.80)
+  }
+  if (return_data){
+    return(res)
+  } else {
+    if (nrow(res)>0){
+      return(TRUE)
+    } else {
+      return(FALSE)
+    }
+  }
+}
+
+query_chimerkb <- function(gene1, gene2, return_data = FALSE){
+  res <- chimerkb_db %>% 
+    filter((H_gene == gene1 & T_gene == gene2) | (H_gene == gene2 & T_gene == gene1))
+  if (return_data){
+    return(res)
+  } else {
+    if (nrow(res)>0){
+      return(TRUE)
+    } else {
+      return(FALSE)
+    }
+  }
+}
+```
+
+```{r}
+fusion_data$in_chimerseq <- mapply(query_chimerseq, fusion_data$gene_id1, fusion_data$gene_id2)
+fusion_data$in_chimerkb <- mapply(query_chimerkb, fusion_data$gene_id1, fusion_data$gene_id2)
+fusion_data$in_chimerpub <- mapply(query_chimerpub, fusion_data$gene_id1, fusion_data$gene_id2)
+```
+
+## All hits
+
+I filter for 'strong' levels of evidence in each database. ChimerSeq results are only included if they are part of the 'ChimerSeq-Plus' group of 'reliable fusion genes', which (as I understand it) appear in multiple sources. ChimerPub hits are only included if they have a prediction score >= .8. Since this is based off a language processing model, it's still possible for there to be false hits. All ChimerKB hits are included.
+
+Filtering hits with less than 2 supporting reads. 
+
+```{r}
+validated_fusions <- fusion_data %>% 
+  # select(sample, gene_id1, gene_id2, split_reads1, split_reads2,
+  #        discordant_mates, coverage1, coverage2, confidence, reading_frame,
+  #        site1, site2, type, filters, in_chimerkb, in_chimerseq, in_chimerpub) %>%
+  filter(in_chimerkb | in_chimerseq | in_chimerpub) %>% 
+  left_join(
+    sample_metadata %>% select(sample, HISTOLOGY),
+    by = 'sample') %>%
+  mutate(sample = substr(sample, 8, 11)) %>%
+  filter(split_reads1 + split_reads2 + discordant_mates > 1)
+validated_fusions_table <- validated_fusions %>%
+  select(HISTOLOGY, sample, gene_id1, gene_id2, confidence, in_chimerkb, in_chimerpub, in_chimerseq, split_reads1, split_reads2, discordant_mates, coverage1, coverage2, strand1.gene.fusion., strand2.gene.fusion., site1, site2) %>% 
+  mutate(confidence = factor(confidence, levels = c('high', 'medium', 'low'))) %>%
+  arrange(confidence)
+write.csv(validated_fusions, 'outputs/validated_fusions.csv')
+datatable(validated_fusions, rownames=FALSE)
+```
+
+## Histology level summary
+
+```{r}
+fusion_counts <- validated_fusions %>%
+  mutate(fusion = paste0(gene_id1, '-', gene_id2)) %>%
+  group_by(HISTOLOGY, sample, fusion) %>%
+  summarize(n = n()) %>% 
+  group_by(HISTOLOGY, fusion) %>%
+  summarize(n = n()) %>% 
+  as.data.frame() %>% 
+  arrange(desc(n)) %>% 
+  mutate(fusion_counts = paste0(fusion, '{',n,'}')) %>%
+  group_by(HISTOLOGY) %>%
+  summarize(fusions = paste(fusion_counts, collapse = ';  '))
+
+sample_counts <- validated_fusions %>%
+  #mutate(sample = substr(sample, 8, 11)) %>%
+  mutate(fusion = paste0(gene_id1, '-', gene_id2)) %>%
+  group_by(HISTOLOGY, sample, fusion) %>%
+  summarize(n = n()) %>% 
+  group_by(HISTOLOGY, sample) %>%
+  summarize(n = n()) %>%
+  arrange(desc(n)) %>% 
+  mutate(sample_counts = paste0(sample, '{', n, '}')) %>%
+  group_by(HISTOLOGY) %>%
+  summarize(samples = paste(sample_counts, collapse = ';  '))
+
+
+summarized_chimeradb_results <- validated_fusions %>% 
+  mutate(fusion = paste0(gene_id1, '-', gene_id2)) %>%
+  group_by(HISTOLOGY) %>% 
+  summarize(n_mutated_samples = n_distinct(sample),
+            n_fusions = n_distinct(fusion)) %>% 
+  left_join(fusion_counts, by = 'HISTOLOGY') %>%
+  left_join(sample_counts, by = 'HISTOLOGY') %>%
+  left_join(sample_metadata %>% 
+              group_by(HISTOLOGY) %>%
+              summarize(n_total_samples = n_distinct(`Sample.ID`)),
+            by = 'HISTOLOGY') %>%
+  mutate(fraction_affected = round(n_mutated_samples /  n_total_samples, 3)) %>% 
+  relocate(c(HISTOLOGY, n_total_samples, n_mutated_samples, fraction_affected,
+             n_fusions, samples, fusions))
+
+datatable(summarized_chimeradb_results,
+          colnames = c('Histology', 'Total samples', 'Samples with chimerdb fusion',
+                       'Fraction of samples with chimerdb fusion',
+                       'Number of unique fusions', 'Samples {count}', 'Fusions {count}'),
+          rownames = FALSE,
+          options = list(
+            autoWidth = TRUE,
+            columnDefs = list(
+              list(width = '10%', targets = list(0,3)),
+              list(width = '7', targets = list(1,2,4)), 
+              list(width = '17%', targets = 5),
+              list(width = '52%', targets = 6)
+              )))  #%>% formatStyle(c('fusions', "samples"),"word-break"="keep-all")
+```
+
+```{r, eval = FALSE}
+chimerdb_results <- mapply(query_chimerseq, validated_fusions$gene_id1, validated_fusions$gene_id2, return_data = TRUE, SIMPLIFY = FALSE)
+chimerdb_results <- do.call(rbind, chimerdb_results)
+chimerdb_results %>% select(Fusion_pair, Cancertype, ChimerDB_Type)
+```
+
+# Querying OncoKB
+
+```{r}
+query_oncokb_api_fusions <- function(gene1, gene2){
+  url = "https://www.oncokb.org/api/v1/annotate/structuralVariants"
+  token <- '661e1a4e-56ae-4b91-a236-6cfbab90eac2'
+  # res_POST <- POST(url,
+  #                  body = json_enc,
+  #                  encode = 'json')
+  res_GET <- GET(url, 
+             query = list(hugoSymbolA = gene1,
+                          hugoSymbolB = gene2,
+                          structuralVariantType = 'FUSION', 
+                          isFunctionalFusion = 'true',
+                          referenceGenome = 'GRCh38'),
+             add_headers(Authorization = paste0(' Bearer ', token),
+                         accept = 'application/json'))
+  res_content <- fromJSON(rawToChar(res_GET$content), flatten = TRUE)
+  treatments <- res_content$treatments 
+  if (length(treatments)>0) { 
+    treatments <- treatments %>% filter(grepl('Fusions', alterations))
+    if (nrow(treatments)>0) {
+      treatments$drugName <- lapply(1:nrow(treatments),
+                                    function(x){treatments$drugs[[x]]$drugName})
+      treatments$fusion <- paste0(gene1, '-', gene2)
+      treatments$gene1 <- gene1
+      treatments$gene2 <- gene2
+      treatments <- treatments %>%
+        select(fusion, gene1, gene2, alterations, drugName, level,
+               fdaLevel, levelAssociatedCancerType.mainType.name)
+      return(treatments)
+    } else {
+      return(NA)
+    }
+  } else {
+      return(NA)
+  }
+}
+```
+
+```{r}
+httr::set_config(httr::config(http_version = 2))
+oncokb_results <- mapply(query_oncokb_api_fusions,
+               fusion_data$gene_id1,
+               fusion_data$gene_id2)
+
+oncokb_results <- oncokb_results[!is.na(oncokb_results)]
+oncokb_results <- do.call(rbind, oncokb_results)
+
+```
+
+## Drug targets
+
+```{r}
+oncokb_results %>%
+  select(-c(gene1, gene2, alterations)) %>%
+  # group_by(fusion, level, fdaLevel, levelAssociatedCancerType.mainType.name) %>%
+  # summarize(drugName = paste0(drugName, collapse = '; ')) %>%
+  group_by(fusion, drugName, level, fdaLevel) %>%
+  summarize(associatedCancerTypes = paste(levelAssociatedCancerType.mainType.name,
+                                          collapse = ',  ')) %>%
+           
+datatable(rownames = FALSE)
+```
+
+## Evidence for drug targets in our data
+
+```{r}
+fusion_data %>% 
+  filter((gene_id1 %in% oncokb_results$gene1 & gene_id2 %in% oncokb_results$gene2) | 
+           (gene_id1 %in% oncokb_results$gene2 & gene_id2 %in% oncokb_results$gene1)) %>%
+  left_join(
+    sample_metadata %>% select(sample, HISTOLOGY),
+    by = 'sample') %>%
+  mutate(sample = substr(sample, 8, 11)) %>%
+  select(sample, HISTOLOGY, gene_id1, gene_id2, confidence,
+         in_chimerkb, in_chimerpub, in_chimerseq, split_reads1,
+         split_reads2, discordant_mates, coverage1, coverage2,
+         strand1.gene.fusion., strand2.gene.fusion., site1, site2) %>%
+  datatable(rownames = FALSE)
+```
+
+
+```{r, eval = FALSE}
+url = "https://www.oncokb.org/api/v1/annotate/structuralVariants"
+token <- '661e1a4e-56ae-4b91-a236-6cfbab90eac2'
+test <- list()
+
+res_POST <- POST(url,
+                 query = list(geneA = head(fusion_data$gene_id1),
+                              geneB = head(fusion_data$gene_id2),
+                              structuralVariantType = 'FUSION', 
+                              isFunctionalFusion = 'true',
+                          referenceGenome = 'GRCh38'),
+                 add_headers(Authorization = paste0(' Bearer ', token),
+                           accept = 'application/json'),
+                 encode = 'json')
+
+
+res_GET <- GET(url, 
+             query = list(hugoSymbolA = gene1,
+                          hugoSymbolB = gene2,
+                          structuralVariantType = 'FUSION', 
+                          isFunctionalFusion = 'false',
+                          referenceGenome = 'GRCh38'),
+             add_headers(Authorization = paste0(' Bearer ', token),
+                         accept = 'application/json'))
+  res_content <- fromJSON(rawToChar(res_GET$content), flatten = TRUE)
+  treatments <- res_content$treatments 
+```
+
+
+# Novel fusions
+
+```{r}
+get_oncokb_curated_genes <- function(includeEvidence = FALSE){
+  url = "https://www.oncokb.org/api/v1/utils/cancerGeneList.txt"
+  token <- '661e1a4e-56ae-4b91-a236-6cfbab90eac2'
+  res_GET <- GET(url, 
+             query = list(includeEvidence = includeEvidence),
+             add_headers(Authorization = paste0(' Bearer ', token),
+                         accept = 'text/plain'))
+  res_content <- read.table(text = rawToChar(res_GET$content), sep = '\t', header = TRUE, comment.char = '', fill = FALSE)
+  res_content
+}
+oncokb_genes <- get_oncokb_curated_genes() %>% 
+  filter(OncoKB.Annotated == 'Yes') %>%
+  select(Hugo.Symbol, Is.Oncogene, Is.Tumor.Suppressor.Gene)
+```
+
+```{r}
+fusion_data.medlow <- fusion_data %>% filter(confidence!='high')
+fusion_data.high <- fusion_data %>% filter(confidence=='high')
+
+print('Only examining arriba calls with high confidence. Low and medium confidence hits are removed')
+```
+
+## Evidence
+
+Oncogene and tumor suppressor info is added on a per-gene basis from OncoKB queries
+
+```{r}
+novel_fusions <- fusion_data.high %>% 
+  select(sample, X.gene1, gene2, split_reads1, split_reads2,
+         discordant_mates, coverage1, coverage2, confidence,
+         reading_frame, site1, site2, type, filters,
+         in_chimerkb, in_chimerseq, in_chimerpub) %>%
+  filter(! (in_chimerkb | in_chimerseq | in_chimerpub)) %>% 
+  filter(confidence == 'high') %>%
+  filter(split_reads1 + split_reads2 + discordant_mates > 1) %>%
+  select( -c  (in_chimerkb | in_chimerseq | in_chimerpub)) %>%
+  left_join(
+    sample_metadata %>%
+      select(sample, HISTOLOGY),
+    by = 'sample') %>%
+  relocate( sample, HISTOLOGY) %>%
+  mutate(sample = substr(sample, 8, 11))
+
+novel_fusions <- novel_fusions %>%
+  mutate(gene1.is.oncogene = recode(X.gene1,
+                                        !!!setNames(oncokb_genes$Is.Oncogene,
+                                                    oncokb_genes$Hugo.Symbol),
+                                           .default = ''),
+         gene2.is.oncogene = recode(gene2,
+                                        !!!setNames(oncokb_genes$Is.Oncogene,
+                                                    oncokb_genes$Hugo.Symbol),
+                                           .default = ''),
+         gene1.is.tumor.supressor = recode(X.gene1,
+                                               !!!setNames(oncokb_genes$Is.Tumor.Suppressor.Gene,
+                                                           oncokb_genes$Hugo.Symbol),
+                                           .default = ''),
+         gene2.is.tumor.supressor = recode(gene2,
+                                               !!!setNames(oncokb_genes$Is.Tumor.Suppressor.Gene,
+                                                           oncokb_genes$Hugo.Symbol),
+                                           .default = ''),
+         ) 
+
+write.csv(novel_fusions, 'outputs/novel_fusions.csv')
+datatable(novel_fusions, rownames = FALSE, filter = 'top') %>% formatStyle(c("sample"),"white-space"="nowrap")
+```
+
+## Fusion level summary
+
+```{r}
+fusion_data.high %>% 
+  select(sample, X.gene1, gene2, split_reads1, split_reads2,
+         discordant_mates, coverage1, coverage2, confidence,
+         reading_frame, site1, site2, type, filters,
+         in_chimerkb, in_chimerseq, in_chimerpub) %>%
+  filter(! (in_chimerkb | in_chimerseq | in_chimerpub)) %>% 
+  filter(confidence == 'high') %>%
+  group_by(X.gene1, gene2) %>%
+  summarize(n = n_distinct(sample)) %>%
+  arrange(desc(n)) %>%
+  datatable(colnames = c('Gene 1', 'Gene 2', '# of samples with fusion'), rownames = FALSE)
+```
+
+## Histology level summary
+
+```{r}
+fusion_counts <- novel_fusions %>%
+  mutate(fusion = paste0(X.gene1, '-', gene2)) %>%
+  group_by(HISTOLOGY, sample, fusion) %>%
+  summarize(n = n()) %>% 
+  group_by(HISTOLOGY, fusion) %>%
+  summarize(n = n()) %>% 
+  as.data.frame() %>% 
+  arrange(desc(n)) %>% 
+  mutate(fusion_counts = paste0(fusion, '{',n,'}')) %>%
+  group_by(HISTOLOGY) %>%
+  summarize(fusions = paste(fusion_counts, collapse = ';  '))
+
+sample_counts <- novel_fusions %>%
+  #mutate(sample = substr(sample, 6, 100)) %>%
+  mutate(fusion = paste0(X.gene1, '-', gene2)) %>%
+  group_by(HISTOLOGY, sample, fusion) %>%
+  summarize(n = n()) %>% 
+  group_by(HISTOLOGY, sample) %>%
+  summarize(n = n()) %>%
+  arrange(desc(n)) %>% 
+  mutate(sample_counts = paste0(sample, '{', n, '}')) %>%
+  group_by(HISTOLOGY) %>%
+  summarize(samples = paste(sample_counts, collapse = ';  '))
+# 
+#   group_by(HISTOLOGY, sample) %>%
+#   summarize(n = n()) %>%
+#   arrange(desc(n)) %>% 
+#   mutate(sample_counts = paste0(sample, '{', n, '}')) %>%
+#   arrange(desc(n)) %>% 
+#   group_by(HISTOLOGY) %>%
+#   summarize(samples = paste(sample_counts, collapse = ';  '))
+
+
+summarized_chimeradb_results <- novel_fusions %>% 
+  mutate(fusion = paste0(X.gene1, '-', gene2)) %>%
+  group_by(HISTOLOGY) %>% 
+  summarize(n_mutated_samples = n_distinct(sample),
+            n_fusions = n_distinct(fusion)) %>% 
+  left_join(fusion_counts, by = 'HISTOLOGY') %>%
+  left_join(sample_counts, by = 'HISTOLOGY') %>%
+  left_join(sample_metadata %>% 
+              group_by(HISTOLOGY) %>%
+              summarize(n_total_samples = n_distinct(`Sample.ID`)),
+            by = 'HISTOLOGY') %>%
+  mutate(fraction_affected = round(n_mutated_samples /  n_total_samples, 3)) %>% 
+  relocate(c(HISTOLOGY, n_total_samples, n_mutated_samples, fraction_affected,
+             n_fusions, samples, fusions))
+
+datatable(summarized_chimeradb_results,
+          colnames = c('Histology', 'Total samples', 'Samples with fusion',
+                       'Fraction of samples with fusion', 'Number of unique fusions',
+                       'Samples {count}', 'Fusions {count}'),
+          rownames = FALSE,
+          options = list(
+            autoWidth = TRUE,
+            columnDefs = list(
+              list(width = '10%', targets = list(0,3)),
+              list(width = '7', targets = list(1,2,4)), 
+              list(width = '17%', targets = 5),
+              list(width = '52%', targets = 6)
+              ))) #%>% formatStyle(c('fusions', "samples"),"white-space"="nowrap")
+```
