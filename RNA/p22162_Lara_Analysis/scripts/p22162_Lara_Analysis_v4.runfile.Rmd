@@ -64,7 +64,8 @@ analysis$config <- yaml.load_file(here("config/config_v4.yml"))
 
 ```{r sample_metadata_setup}
 
-analysis$sampleTable <- read.table(here("config/p22162_Lara_exp_design_v4.txt"), header=T, stringsAsFactors = FALSE, sep="\t", quote='"')
+analysis$sampleTable <- read.table(here("config/p22162_Lara_exp_design_v4.txt"),
+                                   header=T, stringsAsFactors = FALSE, sep="\t", quote='"')
 analysis$sampleTable$CollectionDate <- as.Date(analysis$sampleTable$CollectionDate,
                                                tryFormats=c("%m/%d/%y"))
 analysis$sampleTable$CollectionSite <- plyr::mapvalues(analysis$sampleTable$CollectionSite,

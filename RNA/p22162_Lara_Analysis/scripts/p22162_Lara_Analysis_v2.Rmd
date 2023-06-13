@@ -8,7 +8,9 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo=FALSE, fig.width = 8, fig.height = 4, cache=FALSE, cache.lazy = FALSE, cache.rebuild = FALSE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo=FALSE, 
+                      fig.width = 8, fig.height = 4,
+                      cache=FALSE, cache.lazy = FALSE, cache.rebuild = FALSE)
 library(tidyverse)
 library(ggforce)
 library(grid)
@@ -63,7 +65,9 @@ analysis$config <- yaml.load_file(here("config/config_v2.yml"))
 
 ```{r sample_metadata_setup}
 
-analysis$sampleTable <- read.table(here("config/p22162_Lara_exp_design.txt"), header=T, stringsAsFactors = FALSE, sep="\t", quote='"')
+analysis$sampleTable <- read.table(here("config/p22162_Lara_exp_design.txt"),
+                                   header=T, stringsAsFactors = FALSE, 
+                                   sep="\t", quote='"')
 analysis$sampleTable$CollectionDate <- as.Date(analysis$sampleTable$CollectionDate,
                                                tryFormats=c("%m/%d/%y"))
 analysis$sampleTable$CollectionSite <- plyr::mapvalues(analysis$sampleTable$CollectionSite,
@@ -89,8 +93,11 @@ sample_order <- fct_inorder(as.character(analysis$sampleTable$SampleID))
 
 ```{r}
 if (!is.null(unlist(analysis$config$dropSamples))){
-  out <- paste0("Sample(s)\n", paste0(analysis$config$dropSamples, sep=", ", collapse = ''),"\nbeing removed from downstream analysis per user specification.") 
-  analysis$sampleTable <- analysis$sampleTable %>% filter(!SampleID %in% analysis$config$dropSamples)
+  out <- paste0("Sample(s)\n", 
+                paste0(analysis$config$dropSamples, sep=", ", collapse = ''),
+                "\nbeing removed from downstream analysis per user specification.") 
+  analysis$sampleTable <- analysis$sampleTable %>% 
+    filter(!SampleID %in% analysis$config$dropSamples)
   sample_order <- sample_order[!(sample_order %in% as.factor(analysis$config$dropSamples))]
   cat(out)
 } else {
@@ -100,9 +107,8 @@ sample_order <- droplevels(sample_order)
 ```
 
 ```{r read_counts_tables, include=FALSE}
-#analysis$samplefileIDs <- dir(file.path(analysis$config$rootDir, analysis$config$alignmentDir), pattern=paste0("*",analysis$config$STARreadSuffix)
 analysis$samplefileIDs <- analysis$sampleTable$FileID
-#analysis$samplefileIDs <- analysis$samplefileIDs[analysis$samplefileIDs %in% analysis$sampleTable$FileID]
+
 analysis$sampleSTARReads <- sapply(analysis$sampleTable$FileID, function(sid) {
   read_tsv(file.path(analysis$config$rootDir,
                      analysis$config$alignmentDir,paste0(sid,analysis$config$STARreadSuffix)),
@@ -122,8 +128,13 @@ analysis$mapBins <- do.call(cbind,
 rownames(analysis$mapBins) <- analysis$sampleSTARReads[[1]][c(1:4),][["gene_id"]]
 colnames(analysis$mapBins) <- recode(as.character(unlist(strsplit(analysis$sampleTable$SampleID, paste0(".", analysis$config$libraryType, "_count")))), !!!setNames(analysis$sampleTable$SampleID, as.character(analysis$sampleTable$FileID)))
  
-raw_counts <- do.call(cbind,sapply(analysis$sampleTable$FileID, function(sid){analysis$sampleSTARReads[[sid]][,paste0( analysis$config$libraryType, "_count")][-c(1:4),]}))
-colnames(raw_counts) <- recode(as.character(unlist(strsplit(analysis$sampleTable$FileID, paste0(".", analysis$config$libraryType, "_count")))), !!!setNames(analysis$sampleTable$SampleID, as.character(analysis$sampleTable$FileID)))
+raw_counts <- do.call(cbind,sapply(analysis$sampleTable$FileID,
+                                   function(sid){
+                                     analysis$sampleSTARReads[[sid]][,paste0( analysis$config$libraryType, "_count")][-c(1:4),]}))
+colnames(raw_counts) <- recode(as.character(unlist(strsplit(analysis$sampleTable$FileID,
+                                                            paste0(".", analysis$config$libraryType, "_count")))),
+                               !!!setNames(analysis$sampleTable$SampleID,
+                                           as.character(analysis$sampleTable$FileID)))
 rownames(analysis$sampleTable) <- analysis$sampleTable$SampleID
 analysis$sampleTable <- analysis$sampleTable[colnames(raw_counts),]
 analysis$dds <- DESeqDataSetFromMatrix(raw_counts,
@@ -140,11 +151,13 @@ analysis$mapBins <- rbind(analysis$mapBins,"N_identified" = colSums2(DESeq2::cou
 Mapping outcomes of reads from each sample. Reads need to be 'identified' or successfully mapped to a single feature to be used for gene expression analysis.
 
 ```{r mapping_plot, fig.width=12}
-mapping_plot(analysis$mapBins, sort=TRUE)# + aes(sort(SampleID))
+mapping_plot(analysis$mapBins, sort=TRUE)
 ```
 
 ```{r gene_names, include=FALSE}
-geneInfoTab <- read_tsv(file.path(analysis$config$rootDir, analysis$config$referenceDir, "geneInfo.tab"), skip = 1, col_names = c("gene_id","gene_symbol","gene_type"))
+geneInfoTab <- read_tsv(file.path(analysis$config$rootDir,
+                                  analysis$config$referenceDir, "geneInfo.tab"),
+                        skip = 1, col_names = c("gene_id","gene_symbol","gene_type"))
 
 ## Remove samples if there are fewer total fragment counts than there are possible features
 ## Somewhat arbitrary lower bound and shouldn't be an issue, but could catch a technical error
@@ -278,10 +291,6 @@ maxMinFilter <- function(object, intgroup = "condition", comp = c("ctrl","trmt")
 }
 ```
 
-```{r}
-
-```
-
 ```{r GSEA_setup}
 ## read in rlog file
 #rlog_for_GSEA <- read.csv(paste0("rlog_forGSEA_", analysis$config$analysis, ".txt"), sep='\t')
@@ -328,7 +337,12 @@ my_comparisons <- list(list(c('Groupplasmacytoid'),
 
 pairwise_comparisons <- function(x, alpha=0.05){
   ## Generate DESeq2 results objects for contrasts of interest
-  result <- results(analysis$ddsDrop, contrast = x, alpha = alpha, listValues = c(1, -1/4), filter=maxMinFilter(analysis$ddsDrop, intgroup = 'Group', comp = c('adenocarcinoma', 'squamous', 'small cell', 'plasmacytoid', 'sarcomatoid')))
+  result <- results(analysis$ddsDrop, contrast = x, alpha = alpha,
+                    listValues = c(1, -1/4), 
+                    filter=maxMinFilter(analysis$ddsDrop, intgroup = 'Group',
+                                        comp = c('adenocarcinoma', 'squamous',
+                                                 'small cell', 'plasmacytoid',
+                                                 'sarcomatoid')))
   # if (class(x) == 'list'){
   #   result <- results(analysis$ddsDrop, contrast=x, test='Wald', alpha=alpha)
   # } else if (class(x) == 'character'){
