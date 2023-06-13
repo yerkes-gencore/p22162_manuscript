@@ -66,7 +66,7 @@ pathways.core.cancer.oncopathwayformat <- stack(pathways.core) %>% filter(grepl(
 query_oncokb_api_check <- function(gene, mutation){
   
   url = "https://www.oncokb.org/api/v1/annotate/mutations/byProteinChange"
-  token <- '661e1a4e-56ae-4b91-a236-6cfbab90eac2'
+  token <- ##Please use your own token
   res_GET <- GET(url, 
              query = list(hugoSymbol = gene,
                           alteration = mutation, 
@@ -87,7 +87,7 @@ query_oncokb_api_check <- function(gene, mutation){
 query_oncokb_api_check_nomut <- function(gene){
   
   url = "https://www.oncokb.org/api/v1/annotate/mutations/byProteinChange"
-  token <- '661e1a4e-56ae-4b91-a236-6cfbab90eac2'
+  token <- ##PLease use your own token
   res_GET <- GET(url, 
              query = list(hugoSymbol = gene, 
                           referenceGenome = 'GRCh38'),
@@ -106,7 +106,7 @@ query_oncokb_api_check_nomut <- function(gene){
 
 query_oncokb_api_drug <- function(gene, mutation){
   url = "https://www.oncokb.org/api/v1/annotate/mutations/byProteinChange"
-  token <- '661e1a4e-56ae-4b91-a236-6cfbab90eac2'
+  token <- ##PLease use your own token
   res_GET <- GET(url, 
              query = list(hugoSymbol = gene,
                           alteration = mutation, 
