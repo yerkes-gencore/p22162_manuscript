@@ -417,7 +417,10 @@ my_OncogenicPathways(bladder_TCGA_cohort, panelWidths = c(1,3,3))#, pathways = c
 Comparing mutation distribution of our dataset to various TCGA datasets. BLCA is the urothelial bladder carcinoma cohort. The y axis is Total Mutation Burden. We still have a slightly higher TMB per sample, likely due to using fewer variant callers, but we are in the same general range. 
 
 ```{r, results='hide', fig.keep='all', warning=FALSE}
-tcgaCompare(samples.maf.tmb, cohortName = 'p22162_Lara', capture_size = 42.988611)
+pdf(file = 'outputs/tmb_figure.pdf', height = 7, width = 10)
+tmb_figure <- tcgaCompare(samples.maf.tmb, cohortName = 'Emory - BCDD', capture_size = 42.988611)
+# tmb_figure
+dev.off()
 ```
 
 Genes that are enriched in one cohort over the other. 
